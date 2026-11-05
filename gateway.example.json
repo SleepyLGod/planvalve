@@ -1,0 +1,13 @@
+{
+  "port": 8787,
+  "fixturePath": "./fixtures/observed-json.json",
+  "queueCapacity": 64,
+  "maxQueueWaitMs": 60000,
+  "minStartIntervalMs": 0,
+  "upstreamTimeoutMs": 120000,
+  "maxRequests": 1000,
+  "stopAfterTokens": 100000,
+  "profile": "lotus",
+  "reportPath": "./reports/latest.json",
+  "databasePath": "./data/gateway.sqlite"
+}

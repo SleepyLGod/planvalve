@@ -1,0 +1,530 @@
+{
+  "name": "observed-json",
+  "events": [
+    {
+      "response": {
+        "id": "resp_fixture_001",
+        "created_at": 1793885807.0,
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "metadata": {},
+        "model": "offline-model",
+        "object": "response",
+        "output": [],
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 0.98,
+        "background": false,
+        "completed_at": null,
+        "conversation": null,
+        "max_output_tokens": null,
+        "max_tool_calls": null,
+        "previous_response_id": null,
+        "prompt": null,
+        "prompt_cache_key": "08bdae69-1e80-48d7-bde7-bd3d7cdbadec",
+        "prompt_cache_retention": "24h",
+        "reasoning": {
+          "effort": "medium",
+          "generate_summary": null,
+          "summary": null,
+          "context": "all_turns",
+          "mode": "standard"
+        },
+        "safety_identifier": "user-gKcNLG2y4i9TOwnY1lpquQn8",
+        "service_tier": "auto",
+        "status": "in_progress",
+        "text": {
+          "format": {
+            "name": "semantic_batch",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "required": ["answer"],
+              "additionalProperties": false
+            },
+            "type": "json_schema",
+            "description": null,
+            "strict": true
+          },
+          "verbosity": "medium"
+        },
+        "top_logprobs": 0,
+        "truncation": "disabled",
+        "usage": null,
+        "user": null,
+        "access_programs": {
+          "cyber": "standard"
+        },
+        "frequency_penalty": 0.0,
+        "image": {
+          "context_compression": "disabled"
+        },
+        "moderation": null,
+        "presence_penalty": 0.0,
+        "store": false,
+        "tool_usage": {
+          "image_gen": {
+            "input_tokens": 0,
+            "input_tokens_details": {
+              "image_tokens": 0,
+              "text_tokens": 0
+            },
+            "output_tokens": 0,
+            "output_tokens_details": {
+              "image_tokens": 0,
+              "text_tokens": 0
+            },
+            "total_tokens": 0
+          },
+          "web_search": {
+            "num_requests": 0
+          }
+        }
+      },
+      "sequence_number": 0,
+      "type": "response.created"
+    },
+    {
+      "response": {
+        "id": "resp_fixture_001",
+        "created_at": 1793885807.0,
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "metadata": {},
+        "model": "offline-model",
+        "object": "response",
+        "output": [],
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 0.98,
+        "background": false,
+        "completed_at": null,
+        "conversation": null,
+        "max_output_tokens": null,
+        "max_tool_calls": null,
+        "previous_response_id": null,
+        "prompt": null,
+        "prompt_cache_key": "08bdae69-1e80-48d7-bde7-bd3d7cdbadec",
+        "prompt_cache_retention": "24h",
+        "reasoning": {
+          "effort": "medium",
+          "generate_summary": null,
+          "summary": null,
+          "context": "all_turns",
+          "mode": "standard"
+        },
+        "safety_identifier": "user-gKcNLG2y4i9TOwnY1lpquQn8",
+        "service_tier": "auto",
+        "status": "in_progress",
+        "text": {
+          "format": {
+            "name": "semantic_batch",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "required": ["answer"],
+              "additionalProperties": false
+            },
+            "type": "json_schema",
+            "description": null,
+            "strict": true
+          },
+          "verbosity": "medium"
+        },
+        "top_logprobs": 0,
+        "truncation": "disabled",
+        "usage": null,
+        "user": null,
+        "access_programs": {
+          "cyber": "standard"
+        },
+        "frequency_penalty": 0.0,
+        "image": {
+          "context_compression": "disabled"
+        },
+        "moderation": null,
+        "presence_penalty": 0.0,
+        "store": false,
+        "tool_usage": {
+          "image_gen": {
+            "input_tokens": 0,
+            "input_tokens_details": {
+              "image_tokens": 0,
+              "text_tokens": 0
+            },
+            "output_tokens": 0,
+            "output_tokens_details": {
+              "image_tokens": 0,
+              "text_tokens": 0
+            },
+            "total_tokens": 0
+          },
+          "web_search": {
+            "num_requests": 0
+          }
+        }
+      },
+      "sequence_number": 1,
+      "type": "response.in_progress"
+    },
+    {
+      "item": {
+        "id": "msg_fixture_002",
+        "content": [],
+        "role": "assistant",
+        "status": "in_progress",
+        "type": "message",
+        "phase": "final_answer"
+      },
+      "output_index": 0,
+      "sequence_number": 2,
+      "type": "response.output_item.added"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_fixture_002",
+      "output_index": 0,
+      "part": {
+        "annotations": [],
+        "text": "",
+        "type": "output_text",
+        "logprobs": []
+      },
+      "sequence_number": 3,
+      "type": "response.content_part.added"
+    },
+    {
+      "content_index": 0,
+      "delta": "{\"",
+      "item_id": "msg_fixture_002",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 4,
+      "type": "response.output_text.delta",
+      "obfuscation": "MKg6IXP1xxuMQ7"
+    },
+    {
+      "content_index": 0,
+      "delta": "answer",
+      "item_id": "msg_fixture_002",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 5,
+      "type": "response.output_text.delta",
+      "obfuscation": "U73FPkjpuJ"
+    },
+    {
+      "content_index": 0,
+      "delta": "\":",
+      "item_id": "msg_fixture_002",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 6,
+      "type": "response.output_text.delta",
+      "obfuscation": "8fm8OA49EHnKcl"
+    },
+    {
+      "content_index": 0,
+      "delta": "2",
+      "item_id": "msg_fixture_002",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 7,
+      "type": "response.output_text.delta",
+      "obfuscation": "aW8U7Oeimxj31NG"
+    },
+    {
+      "content_index": 0,
+      "delta": "}",
+      "item_id": "msg_fixture_002",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 8,
+      "type": "response.output_text.delta",
+      "obfuscation": "hs1vKBXqVuAY0JO"
+    },
+    {
+      "delta": null,
+      "sequence_number": 9,
+      "type": "response.metadata",
+      "response_id": "resp_fixture_001",
+      "metadata": {
+        "openai_chatgpt_moderation_metadata": {
+          "prompt": {
+            "omnimod": {
+              "protection_type": "omnimod",
+              "outputs": [
+                {
+                  "results": [
+                    {
+                      "category_flags": {
+                        "A1": false,
+                        "A2": false,
+                        "A3": false,
+                        "C1": false,
+                        "C11": false,
+                        "C2": false,
+                        "E1": false,
+                        "E2": false,
+                        "E3": false,
+                        "H1": false,
+                        "H2": false,
+                        "H3": false,
+                        "JB1": false,
+                        "K1": false,
+                        "K2": false,
+                        "K3": false,
+                        "K4": false,
+                        "P1": false,
+                        "P2": false,
+                        "P3": false,
+                        "P4": false,
+                        "PD1": false,
+                        "PD4": false,
+                        "S1": false,
+                        "S3+": false,
+                        "S4": false,
+                        "SH": false,
+                        "TXT-C3": false,
+                        "TXT-C4": false,
+                        "V1": false,
+                        "V2+": false,
+                        "V4+": false,
+                        "REFUSED": false,
+                        "CBRN-B1+": false,
+                        "IMG-C1": false,
+                        "IMG-C11": false,
+                        "IMG-C2": false,
+                        "IMG-S1": false,
+                        "IMG-SH": false,
+                        "IMG-V1": false,
+                        "IMG-V2+": false,
+                        "IMG-V4+": false
+                      }
+                    }
+                  ],
+                  "is_blocked": false
+                }
+              ]
+            }
+          },
+          "generation": {},
+          "tool_call": {},
+          "tool_response": {}
+        }
+      }
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_fixture_002",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 10,
+      "text": "{\"answer\":2}",
+      "type": "response.output_text.done"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_fixture_002",
+      "output_index": 0,
+      "part": {
+        "annotations": [],
+        "text": "{\"answer\":2}",
+        "type": "output_text",
+        "logprobs": []
+      },
+      "sequence_number": 11,
+      "type": "response.content_part.done"
+    },
+    {
+      "item": {
+        "id": "msg_fixture_002",
+        "content": [
+          {
+            "annotations": [],
+            "text": "{\"answer\":2}",
+            "type": "output_text",
+            "logprobs": []
+          }
+        ],
+        "role": "assistant",
+        "status": "completed",
+        "type": "message",
+        "phase": "final_answer"
+      },
+      "output_index": 0,
+      "sequence_number": 12,
+      "type": "response.output_item.done"
+    },
+    {
+      "response": {
+        "id": "resp_fixture_001",
+        "created_at": 1793885807.0,
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "metadata": {},
+        "model": "offline-model",
+        "object": "response",
+        "output": [],
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 0.98,
+        "background": false,
+        "completed_at": 1793885809.0,
+        "conversation": null,
+        "max_output_tokens": null,
+        "max_tool_calls": null,
+        "previous_response_id": null,
+        "prompt": null,
+        "prompt_cache_key": "08bdae69-1e80-48d7-bde7-bd3d7cdbadec",
+        "prompt_cache_retention": "24h",
+        "reasoning": {
+          "effort": "medium",
+          "generate_summary": null,
+          "summary": null,
+          "context": "all_turns",
+          "mode": "standard"
+        },
+        "safety_identifier": "user-gKcNLG2y4i9TOwnY1lpquQn8",
+        "service_tier": "default",
+        "status": "completed",
+        "text": {
+          "format": {
+            "name": "semantic_batch",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "required": ["answer"],
+              "additionalProperties": false
+            },
+            "type": "json_schema",
+            "description": null,
+            "strict": true
+          },
+          "verbosity": "medium"
+        },
+        "top_logprobs": 0,
+        "truncation": "disabled",
+        "usage": {
+          "input_tokens": 58,
+          "input_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          },
+          "output_tokens": 13,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 71,
+          "attribution": {
+            "items": {
+              "msg_fixture_003": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0,
+                "content": [
+                  {
+                    "cache_write_tokens": 0,
+                    "cached_tokens": 0,
+                    "input_tokens": 14,
+                    "output_tokens": 0
+                  }
+                ],
+                "input_tokens": 14,
+                "output_tokens": 0
+              },
+              "msg_fixture_004": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0,
+                "content": [
+                  {
+                    "cache_write_tokens": 0,
+                    "cached_tokens": 0,
+                    "input_tokens": 20,
+                    "output_tokens": 0
+                  }
+                ],
+                "input_tokens": 20,
+                "output_tokens": 0
+              },
+              "msg_fixture_002": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0,
+                "content": [
+                  {
+                    "cache_write_tokens": 0,
+                    "cached_tokens": 0,
+                    "input_tokens": 2,
+                    "output_tokens": 13
+                  }
+                ],
+                "input_tokens": 2,
+                "output_tokens": 13
+              }
+            },
+            "request_fields": {
+              "text.format": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0,
+                "input_tokens": 22,
+                "output_tokens": 0
+              }
+            }
+          }
+        },
+        "user": null,
+        "access_programs": {
+          "cyber": "standard"
+        },
+        "frequency_penalty": 0.0,
+        "image": {
+          "context_compression": "disabled"
+        },
+        "moderation": null,
+        "presence_penalty": 0.0,
+        "store": false,
+        "tool_usage": {
+          "image_gen": {
+            "input_tokens": 0,
+            "input_tokens_details": {
+              "image_tokens": 0,
+              "text_tokens": 0
+            },
+            "output_tokens": 0,
+            "output_tokens_details": {
+              "image_tokens": 0,
+              "text_tokens": 0
+            },
+            "total_tokens": 0
+          },
+          "web_search": {
+            "num_requests": 0
+          }
+        }
+      },
+      "sequence_number": 13,
+      "type": "response.completed"
+    }
+  ],
+  "expectedText": "{\"answer\":2}"
+}

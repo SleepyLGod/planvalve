@@ -1,0 +1,88 @@
+export type ObjectValue = Record<string, unknown>;
+export interface Fixture {
+  name?: string;
+  events: ObjectValue[];
+  expectedText?: string;
+}
+export interface Config {
+  port: number;
+  fixturePath: string;
+  queueCapacity: number;
+  maxQueueWaitMs: number;
+  minStartIntervalMs: number;
+  upstreamTimeoutMs: number;
+  maxRequests: number | null;
+  stopAfterTokens: number | null;
+  profile: "strict" | "lotus";
+  reportPath: string;
+  databasePath: string;
+}
+export interface LedgerRecord {
+  id: string;
+  sequence: number;
+  status:
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "unknown"
+    | "cancelled"
+    | "expired"
+    | "rejected";
+  receivedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  requestHash: string;
+  model?: string;
+  outputFormat?: string;
+  transformations: { parameter: string; requested: unknown; effect: string }[];
+  rawUsage?: ObjectValue;
+  upstreamError?: ObjectValue;
+  upstreamIncompleteDetails?: ObjectValue;
+  usage?: ObjectValue;
+  usageCompleteness?: "complete" | "partial" | "missing";
+}
+export class GatewayError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export interface HistoryRecord extends LedgerRecord {
+  cursor: number;
+  runId: string;
+  historical: boolean;
+  lastKnownState: boolean;
+}
+export interface RequestPage {
+  items: HistoryRecord[];
+  nextCursor: number | null;
+}
+export interface StatusSnapshot {
+  mode: "offline-only" | "subscription-probe";
+  asOf: string;
+  runId: string;
+  startedAt: string;
+  queue: {
+    concurrency: number;
+    running: number;
+    waiting: number;
+    capacity: number;
+    paused: boolean;
+    closed: boolean;
+    minStartIntervalMs: number;
+    maxQueueWaitMs: number;
+    upstreamTimeoutMs: number;
+  };
+  budget: {
+    requests: { used: number; limit: number | null; remaining: number | null };
+    tokens: { used: number; limit: number | null; remaining: number | null };
+  };
+  usage: ReturnType<typeof import("./usage.ts").summarizeUsage>;
+  storage: { healthy: boolean; path: string; error?: string };
+}

@@ -1,0 +1,25 @@
+node_modules/
+.npm-cache/
+dist/
+reports/
+.client-cache/
+data/
+
+# Runtime state and credentials never belong in Git.
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.pem
+*.key
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local implementation notes retain workstation-specific history.
+docs/progress.md
+docs/tui-progress.md

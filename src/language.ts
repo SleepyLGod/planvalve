@@ -1,0 +1,116 @@
+export type Language = "zh" | "en";
+const english: Record<string, string> = {
+  模型网关: "Model gateway",
+  "离线模拟 · 无真实调用": "Offline fixture · No real API",
+  正在连接本地网关: "Connecting to local gateway",
+  "连接中断 · 等待本地网关": "Disconnected · Waiting for gateway",
+  "监控不会发起模型请求。": "Monitoring never sends model requests.",
+  "连接中断 · 保留上次数据": "Disconnected · Last snapshot retained",
+  已暂停: "Paused",
+  已停止: "Stopped",
+  已连接: "Connected",
+  更新: "Updated",
+  运行状态: "Runtime",
+  "本次用量 · 词元": "Usage · tokens",
+  执行中: "Running",
+  排队中: "Queued",
+  已用请求: "Used calls",
+  剩余请求: "Calls left",
+  输入: "Input",
+  输出: "Output",
+  总计: "Total",
+  剩余额度: "Tokens left",
+  不限: "Unlimited",
+  未知: "Unknown",
+  缓存命中: "Cached",
+  推理: "Reasoning",
+  写入缓存: "Cache write",
+  用量未知: "Unknown usage",
+  启动间隔: "Interval",
+  历史存储: "History",
+  正常: "OK",
+  异常: "Error",
+  本次运行: "Current run",
+  请求记录: "Requests",
+  "全部历史 · 状态为最后已知": "All history · Last known states",
+  暂无请求: "No requests",
+  请求编号: "Request ID",
+  状态: "Status",
+  时间: "Time",
+  等待: "Wait",
+  执行: "Run",
+  请求详情: "Request details",
+  "用量明细 · 词元": "Usage details · tokens",
+  "请求信息 · 本机时间": "Request information · Local time",
+  所属运行: "Run scope",
+  "历史记录 · 最后已知状态": "History · Last known state",
+  接收时间: "Received at",
+  等待耗时: "Queue time",
+  执行耗时: "Run time",
+  模型: "Model",
+  输出格式: "Output type",
+  普通文本: "Plain text",
+  "JSON 对象": "JSON object",
+  "JSON 结构": "JSON schema",
+  其他: "Other",
+  温度: "Temperature",
+  采样范围: "Top-p",
+  输出上限: "Output limit",
+  推理设置: "Thinking",
+  其他参数: "Other",
+  参数处理: "Parameters",
+  无参数省略: "No parameters omitted",
+  已省略: "Omitted",
+  "请求未成功；按 R 查看原始错误码。":
+    "Request unsuccessful. Press R for the raw error code.",
+  "缓存命中属于输入，推理属于输出，均不重复计入总计。":
+    "Cached tokens are part of input; reasoning is part of output. Neither is added to total.",
+  "原始数据 · API 字段名保持原样": "Raw data · Original API fields",
+  返回摘要: "Summary",
+  原始数据: "Raw data",
+  毫秒: "ms",
+  秒: "s",
+  " ↑↓ 滚动   R ": " ↑↓ Scroll   R ",
+  "   Esc 返回   Q 退出监控": "   Esc Back   Q Quit",
+  " ↑↓ 选择   回车 明细   ←→ 翻页   Tab 历史   Q 退出监控":
+    " ↑↓ Select   Enter Details   ←→ Page   Tab History   Q Quit",
+  已完成: "Completed",
+  失败: "Failed",
+  未确认: "Unconfirmed",
+  已取消: "Cancelled",
+  已过期: "Expired",
+  已拒绝: "Rejected",
+  "官方订阅 · 真实测试": "ChatGPT plan · LIVE test",
+};
+export function ui(language: Language = "zh") {
+  const t = (text: string): string =>
+    language === "en" ? (english[text] ?? text) : text;
+  const count = (value: unknown): string =>
+    typeof value === "number" ? value.toLocaleString("en-US") : t("未知");
+  const duration = (start?: string, end?: string): string => {
+    if (!start) return "—";
+    const n = Math.max(
+      0,
+      Date.parse(end ?? new Date().toISOString()) - Date.parse(start),
+    );
+    return n < 1000
+      ? `${n} ${t("毫秒")}`
+      : `${(n / 1000).toFixed(1)} ${t("秒")}`;
+  };
+  const states: Record<string, string> = {
+    queued: "排队中",
+    running: "执行中",
+    completed: "已完成",
+    failed: "失败",
+    unknown: "未确认",
+    cancelled: "已取消",
+    expired: "已过期",
+    rejected: "已拒绝",
+  };
+  return {
+    t,
+    count,
+    duration,
+    stateLabel: (state: string) => t(states[state] ?? state),
+  };
+}

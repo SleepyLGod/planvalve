@@ -1,0 +1,30 @@
+{
+  "name": "chatgpt-plan-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline OpenAI-compatible gateway with simulated Responses streams",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "start": "node src/cli.ts",
+    "test": "node --import ./tests/network-guard.ts --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test:lotus": "node --import ./tests/network-guard.ts scripts/lotus-check.ts",
+    "status": "node src/status-cli.ts",
+    "probe:live": "node scripts/subscription-probe.ts"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "openai": "7.51.0",
+    "string-width": "8.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  },
+  "license": "UNLICENSED"
+}
