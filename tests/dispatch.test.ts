@@ -42,9 +42,21 @@ test("dispatch paces actual sends smoothly and releases admission before network
   assert.equal(control.snapshot().effectiveStartIntervalMs, 3000);
 });
 test("failed preparation and unsent expiry do not poison admission or clear cooldown", async () => {
+  let now = 0;
+  const expiry = new AbortController();
   const control = new DispatchControl(
     { minStartIntervalMs: 20, maxRequestsPerMinute: null },
-    undefined,
+    {
+      now: () => now,
+      sleep: async (ms, signal) => {
+        if (!expiry.signal.aborted) {
+          now += 5;
+          expiry.abort(new DOMException("Deadline exceeded", "TimeoutError"));
+        }
+        signal.throwIfAborted();
+        now += ms;
+      },
+    },
     () => 0,
   );
   await assert.rejects(
@@ -66,7 +78,7 @@ test("failed preparation and unsent expiry do not poison admission or clear cool
   let sends = 0;
   await assert.rejects(
     control.run(
-      AbortSignal.timeout(5),
+      expiry.signal,
       async () => "token",
       async () => {
         sends++;
@@ -75,8 +87,9 @@ test("failed preparation and unsent expiry do not poison admission or clear cool
   );
   assert.equal(sends, 0);
   assert.equal(control.snapshot().state, "cooldown");
+  assert.equal(control.snapshot().waitMs, 40);
   await control.run(
-    AbortSignal.timeout(2000),
+    new AbortController().signal,
     async () => "token",
     async () => {
       sends++;

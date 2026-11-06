@@ -226,7 +226,7 @@ test("startup report-write failure closes the already opened server", async () =
   const timer = setTimeout(() => {
     timedOut = true;
     child.kill("SIGTERM");
-  }, 1500);
+  }, 10000); // This is a shutdown/leak check, not a process cold-start benchmark.
   const code = await new Promise<number | null>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", resolve);
@@ -238,6 +238,11 @@ test("startup report-write failure closes the already opened server", async () =
     "startup failure left a listening server behind",
   );
   assert.equal(code, 1, stderr);
+  assert.match(
+    stderr,
+    /EISDIR/,
+    "must reach the intended report-write failure",
+  );
 });
 test("malformed request target returns 400 without an unhandled rejection", async () => {
   const code = `import {createGateway} from './src/gateway.ts';import net from 'node:net';

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { readFileSync } from "node:fs";
 import { createGateway } from "../src/gateway.ts";
@@ -65,90 +66,251 @@ async function until(check: () => boolean): Promise<void> {
   assert.fail("condition did not become true");
 }
 
-test("terminal quota feedback blocks new sends before subscription or probe cancellation settles", async (t) => {
-  const tape = structuredClone(fixture);
-  const terminal = tape.events.at(-1);
-  terminal.type = "response.failed";
-  terminal.response.status = "failed";
-  terminal.response.error = {
-    code: "subscription_sharing_usage_limit_exceeded",
-  };
-  const failed = new TextEncoder().encode(
-    tape.events
-      .map((event: unknown) => `data: ${JSON.stringify(event)}\n\n`)
-      .join(""),
-  );
-  for (const probe of [false, true]) {
-    let calls = 0,
-      cancelling = false,
-      release!: () => void;
-    const barrier = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const send: typeof fetch = async () => {
-      const n = ++calls;
-      return new Response(
-        new ReadableStream({
-          start(c) {
-            c.enqueue(n === 1 ? failed : bytes);
-            if (n > 1) c.close();
-          },
-          async cancel() {
-            cancelling = true;
-            await barrier;
-          },
-        }),
-      );
+for (const kind of ["response.failed", "error", "named-error"] as const) {
+  test(`${kind} quota feedback blocks sends before subscription or probe cleanup`, async (t) => {
+    const code = "subscription_sharing_usage_limit_exceeded";
+    const tape = structuredClone(fixture);
+    const terminal = tape.events.at(-1);
+    terminal.type = "response.failed";
+    terminal.response.status = "failed";
+    terminal.response.error = { code };
+    const errorEvent = {
+      type: "error",
+      code,
+      message: apiKey,
+      param: null,
+      sequence_number: 1,
     };
-    const gateway = probe
-      ? createGateway(
-          { port: 0, databasePath: ":memory:", maxRequests: 2, concurrency: 2 },
-          { model: "test-model", fetch: send },
-        )
-      : createGateway(
-          {
-            upstream: "chatgpt-subscription",
-            model: "test-model",
-            port: 0,
-            databasePath: ":memory:",
-            concurrency: 2,
-            minStartIntervalMs: 0,
-          },
-          undefined,
-          {
-            localKey,
-            fetch: send,
-            subscription: {
-              accessToken: async () => apiKey,
-              status: () => ({ state: "authorized" }),
-              close() {},
+    const failed = new TextEncoder().encode(
+      kind === "response.failed"
+        ? tape.events
+            .map((event: unknown) => `data: ${JSON.stringify(event)}\n\n`)
+            .join("")
+        : `${kind === "named-error" ? "event: error\n" : ""}data: ${JSON.stringify(errorEvent)}\n\n`,
+    );
+    for (const probe of [false, true]) {
+      let calls = 0,
+        cancelling = false,
+        returned = false,
+        release!: () => void;
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const send: typeof fetch = async () => {
+        const n = ++calls;
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(n === 1 ? failed : bytes);
+              if (n > 1) c.close();
             },
-          },
+            async cancel() {
+              cancelling = true;
+              await barrier;
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
         );
-    const url = await gateway.listen();
-    const first = post(url);
-    t.after(async () => {
+      };
+      const options = {
+        port: 0,
+        databasePath: ":memory:",
+        maxRequests: 2,
+        concurrency: 2,
+        minStartIntervalMs: 3000,
+        upstreamTimeoutMs: 10000,
+      };
+      const gateway = probe
+        ? createGateway(options, { model: "test-model", fetch: send })
+        : createGateway(
+            {
+              ...options,
+              upstream: "chatgpt-subscription",
+              model: "test-model",
+            },
+            undefined,
+            {
+              localKey,
+              fetch: send,
+              subscription: {
+                accessToken: async () => apiKey,
+                status: () => ({ state: "authorized" }),
+                close() {},
+              },
+            },
+          );
+      const url = await gateway.listen();
+      const first = post(url).then((response) => {
+        returned = true;
+        return response;
+      });
+      t.after(async () => {
+        release();
+        await first;
+        await gateway.close();
+      });
+      await until(() => cancelling);
+      const second = await post(url);
+      await second.arrayBuffer();
+      assert.equal(second.status, 503);
+      assert.equal(
+        calls,
+        1,
+        "a known quota failure must block the next send even at the 3-second interval",
+      );
+      assert.equal(
+        gateway.status().queue.running,
+        1,
+        "cleanup retains its execution slot",
+      );
+      assert.equal(
+        returned,
+        false,
+        "client response still waits for real cleanup",
+      );
+      assert.equal(gateway.status().pauseReason, code);
+      assert.equal(gateway.records[0]!.upstreamError!.code, code);
+      assert(!JSON.stringify(gateway.report()).includes(apiKey));
       release();
-      await first;
-      await gateway.close();
+      const response = await first;
+      assert.equal(response.status, 429);
+      assert.equal(((await response.json()) as any).error.code, code);
+      assert.equal(calls, 1, "failed calls are never resent");
+    }
+  });
+}
+
+for (const named of [false, true]) {
+  test(`native HTTP ${named ? "named" : "unnamed"} SSE quota errors preserve code and pause`, async (t) => {
+    let calls = 0;
+    const upstream = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(
+        `${named ? "event: error\n" : ""}data: ${JSON.stringify({ type: "error", code: "subscription_sharing_usage_limit_exceeded", message: apiKey, param: null, sequence_number: 1 })}\n\n`,
+      );
     });
-    await until(() => cancelling);
+    await new Promise<void>((resolve) =>
+      upstream.listen(0, "127.0.0.1", resolve),
+    );
+    t.after(
+      () =>
+        new Promise<void>((resolve) => {
+          upstream.close(() => resolve());
+          upstream.closeAllConnections();
+        }),
+    );
+    const address = upstream.address();
+    assert(address && typeof address !== "string");
+    const gateway = createGateway(
+      {
+        upstream: "chatgpt-subscription",
+        model: "test-model",
+        port: 0,
+        databasePath: ":memory:",
+        concurrency: 2,
+        minStartIntervalMs: 3000,
+      },
+      undefined,
+      {
+        localKey,
+        subscription: {
+          accessToken: async () => apiKey,
+          status: () => ({ state: "authorized" }),
+          close() {},
+        },
+        fetch: async (_input, init) => {
+          calls++;
+          return fetch(`http://127.0.0.1:${address.port}`, init);
+        },
+      },
+    );
+    t.after(() => gateway.close());
+    const url = await gateway.listen();
+    const first = await post(url);
+    const result = (await first.json()) as any;
+    assert.equal(first.status, 429);
+    assert.equal(
+      result.error.code,
+      "subscription_sharing_usage_limit_exceeded",
+    );
+    assert.equal(gateway.status().queue.paused, true);
+    assert.equal(gateway.records[0]!.upstreamError!.code, result.error.code);
+    assert(gateway.records[0]!.terminalAt);
+    assert(!JSON.stringify(gateway.report()).includes(apiKey));
     const second = await post(url);
     await second.arrayBuffer();
     assert.equal(second.status, 503);
     assert.equal(calls, 1);
-    assert.equal(
-      gateway.status().queue.running,
-      1,
-      "cleanup retains its execution slot",
-    );
-    assert.equal(
-      gateway.status().pauseReason,
-      "subscription_sharing_usage_limit_exceeded",
-    );
+  });
+}
+
+test("completed output cannot become success when transport cleanup fails", async (t) => {
+  let calls = 0,
+    cancelling = false,
+    returned = false,
+    release!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const gateway = createGateway(
+    {
+      upstream: "chatgpt-subscription",
+      model: "test-model",
+      port: 0,
+      databasePath: ":memory:",
+      minStartIntervalMs: 0,
+    },
+    undefined,
+    {
+      localKey,
+      subscription: {
+        accessToken: async () => apiKey,
+        status: () => ({ state: "authorized" }),
+        close() {},
+      },
+      fetch: async () => {
+        calls++;
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(bytes);
+            },
+            async cancel() {
+              cancelling = true;
+              await barrier;
+              throw new Error("fake cleanup failure");
+            },
+          }),
+        );
+      },
+    },
+  );
+  const url = await gateway.listen();
+  const first = post(url).then((response) => {
+    returned = true;
+    return response;
+  });
+  t.after(async () => {
     release();
-    assert.equal((await first).status, 429);
-  }
+    await first;
+    await gateway.close();
+  });
+  await until(() => cancelling);
+  assert.equal(returned, false);
+  assert.equal(gateway.status().queue.running, 1);
+  assert.equal(gateway.records[0]!.usage!.total_tokens, 71);
+  release();
+  const response = await first;
+  assert.equal(response.status, 502);
+  await response.arrayBuffer();
+  assert.equal(gateway.records[0]!.status, "unknown");
+  assert.equal(gateway.records[0]!.usage!.total_tokens, 71);
+  assert.equal(gateway.status().queue.paused, true);
+  const next = await post(url);
+  await next.arrayBuffer();
+  assert.equal(next.status, 503);
+  assert.equal(calls, 1);
 });
 
 test("raw usage and incomplete details are redacted while stream cleanup is still pending", async (t) => {

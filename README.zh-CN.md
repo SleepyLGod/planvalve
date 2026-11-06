@@ -127,7 +127,7 @@ npm run build
 npm test
 ```
 
-**113 项离线测试**拦截非 loopback 网络；POSIX 终端测试另需 Python 3.9+。可选 [LiteLLM](docs/litellm-integration.md) 和 [LOTUS／SDK](docs/lotus.zh-CN.md) 验收复用已有 Python 环境。
+**119 项离线测试**拦截非 loopback 网络；POSIX 终端测试另需 Python 3.9+。可选 [LiteLLM](docs/litellm-integration.md) 和 [LOTUS／SDK](docs/lotus.zh-CN.md) 验收复用已有 Python 环境。
 
 已完成的小规模真实验证覆盖订阅文本／JSON、usage、重启复用、续期、LiteLLM 和 LOTUS。最新两请求实测在途 **2**、发送间隔 **3.003 秒**。API Key 通道及限流恢复只有离线验收；托管 CI 待处理。[证据、失败与限制 →](docs/offline-verification.md)
 

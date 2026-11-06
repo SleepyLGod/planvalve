@@ -126,7 +126,7 @@ npm run build
 npm test
 ```
 
-The **113-test offline suite** blocks non-loopback networking; POSIX terminal tests also require Python 3.9+. Optional [LiteLLM](docs/litellm-integration.md) and [LOTUS/SDK](docs/lotus.md) checks use existing Python environments.
+The **119-test offline suite** blocks non-loopback networking; POSIX terminal tests also require Python 3.9+. Optional [LiteLLM](docs/litellm-integration.md) and [LOTUS/SDK](docs/lotus.md) checks use existing Python environments.
 
 Bounded live checks covered subscription text/JSON, usage, restart reuse, renewal, LiteLLM and LOTUS. The latest two-request run observed concurrency **2** with sends **3.003 seconds** apart. API-key serving and limit recovery have offline coverage only. Hosted CI is pending. [Evidence, failures and remaining limits →](docs/offline-verification.md)
 
