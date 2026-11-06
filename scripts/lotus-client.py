@@ -108,8 +108,15 @@ mapped = frame.sem_map('Compute {question}; return JSON with an integer answer.'
 assert json.loads(mapped['_answer'].iloc[0]) == {'answer':2}
 assert model.stats.physical_usage.total_tokens == 142
 assert model.stats.cache_hits == 0
+# Also exercise the ordinary official Python SDK without LOTUS conversion.
+from openai import OpenAI
+sdk = OpenAI(api_key='offline-client-not-a-real-key', base_url=sys.argv[1] + '/v1', max_retries=0)
+sdk_result = sdk.chat.completions.create(model='offline-model', messages=[{'role':'user','content':'Return JSON.'}], response_format={'type':'json_object'})
+assert json.loads(sdk_result.choices[0].message.content) == {'answer': 2}
+assert sdk_result.usage is not None and sdk_result.usage.total_tokens == 71
+sdk.close()
 assert not denials, denials
 assert snapshot() == before, 'Original repository or dependency metadata changed'
-result = {'passed':True,'mode':'offline-only','lotus_lm_output':output.outputs[0],'native_sem_map_output':mapped['_answer'].iloc[0], 'usage_per_call':{'input':58,'output':13,'total':71},'calls':2,'repo_source_and_dependencies_unchanged':True if REPO is not None else None,'external_network_attempts':denials,'loopback_connections':len(connections),'codex_config_read':False}
+result = {'passed':True,'mode':'offline-only','lotus_lm_output':output.outputs[0],'native_sem_map_output':mapped['_answer'].iloc[0], 'usage_per_call':{'input':58,'output':13,'total':71},'calls':3,'lotus_calls':2,'official_python_sdk_usage':sdk_result.usage.model_dump(),'repo_source_and_dependencies_unchanged':True if REPO is not None else None,'external_network_attempts':denials,'loopback_connections':len(connections),'codex_config_read':False}
 (ROOT/'reports/lotus-client.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
 print(json.dumps(result,ensure_ascii=False))

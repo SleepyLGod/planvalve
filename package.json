@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Offline OpenAI-compatible gateway with simulated Responses streams",
+  "description": "Local OpenAI-compatible gateway with ChatGPT-plan OAuth, API-key access, serial scheduling and usage monitoring",
   "engines": {
     "node": ">=26"
   },
@@ -14,7 +14,9 @@
     "build": "tsc -p tsconfig.build.json",
     "test:lotus": "node --import ./tests/network-guard.ts scripts/lotus-check.ts",
     "status": "node src/status-cli.ts",
-    "probe:live": "node scripts/subscription-probe.ts"
+    "probe:live": "node scripts/subscription-probe.ts",
+    "auth": "node src/auth-cli.ts",
+    "local": "node src/local-cli.ts"
   },
   "dependencies": {
     "ajv": "8.20.0",
@@ -26,5 +28,5 @@
     "prettier": "3.9.10",
     "typescript": "7.0.2"
   },
-  "license": "UNLICENSED"
+  "license": "MIT"
 }

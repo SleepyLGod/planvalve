@@ -1,0 +1,11 @@
+{
+  "upstream": "chatgpt-subscription",
+  "model": "CHOOSE_AN_ELIGIBLE_MODEL",
+  "profile": "strict",
+  "minStartIntervalMs": 3000,
+  "maxRequests": 1000,
+  "stopAfterTokens": 100000,
+  "authPath": "./data/auth/session.json",
+  "databasePath": "./data/gateway.sqlite",
+  "reportPath": "./reports/latest.json"
+}

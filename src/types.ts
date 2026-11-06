@@ -4,7 +4,12 @@ export interface Fixture {
   events: ObjectValue[];
   expectedText?: string;
 }
+export type UpstreamKind =
+  "offline" | "chatgpt-subscription" | "openai-api-key";
 export interface Config {
+  upstream: UpstreamKind;
+  model: string | null;
+  authPath: string;
   port: number;
   fixturePath: string;
   queueCapacity: number;
@@ -32,12 +37,19 @@ export interface LedgerRecord {
   receivedAt: string;
   startedAt?: string;
   finishedAt?: string;
+  inferenceDispatched?: boolean;
+  dispatchedAt?: string;
+  headersAt?: string;
+  firstTextAt?: string;
+  terminalAt?: string;
+  endReason?: string;
   error?: string;
   requestHash: string;
   model?: string;
   outputFormat?: string;
   transformations: { parameter: string; requested: unknown; effect: string }[];
   rawUsage?: ObjectValue;
+  upstreamHttp?: { status: number; requestId?: string; retryAfter?: string };
   upstreamError?: ObjectValue;
   upstreamIncompleteDetails?: ObjectValue;
   usage?: ObjectValue;
@@ -64,7 +76,16 @@ export interface RequestPage {
   nextCursor: number | null;
 }
 export interface StatusSnapshot {
-  mode: "offline-only" | "subscription-probe";
+  mode:
+    | "offline-only"
+    | "subscription-probe"
+    | "chatgpt-subscription"
+    | "openai-api-key";
+  upstream?: UpstreamKind;
+  authorization?: { state: string };
+  pauseReason?: string;
+  accountBalance?: "unknown";
+  actualCost?: "unknown";
   asOf: string;
   runId: string;
   startedAt: string;

@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import type { Config } from "./types.ts";
 export const defaults: Config = {
+  upstream: "offline",
+  model: null,
+  authPath: "data/auth/session.json",
   port: 8787,
   fixturePath: fileURLToPath(
     new URL("../fixtures/observed-json.json", import.meta.url),
@@ -21,6 +24,16 @@ export function validateConfig(value: unknown): Config {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Configuration must be an object");
   const c = { ...defaults, ...value } as Config;
+  if (
+    !["offline", "chatgpt-subscription", "openai-api-key"].includes(c.upstream)
+  )
+    throw new Error("Invalid upstream");
+  if (c.model !== null && (typeof c.model !== "string" || !c.model.trim()))
+    throw new Error("Invalid model");
+  if (c.upstream !== "offline" && c.model === null)
+    throw new Error("Real upstream requires an explicit model");
+  if (!Object.hasOwn(value, "minStartIntervalMs") && c.upstream !== "offline")
+    c.minStartIntervalMs = 3000;
   for (const key of Object.keys(value))
     if (!Object.hasOwn(defaults, key))
       throw new Error(`Unknown configuration field: ${key}`);
@@ -51,7 +64,12 @@ export function validateConfig(value: unknown): Config {
       throw new Error(`Invalid ${key}`);
   if (!["strict", "lotus"].includes(c.profile))
     throw new Error("Invalid profile");
-  for (const key of ["fixturePath", "reportPath", "databasePath"] as const)
+  for (const key of [
+    "fixturePath",
+    "reportPath",
+    "databasePath",
+    "authPath",
+  ] as const)
     if (typeof c[key] !== "string" || !c[key] || /^https?:/i.test(c[key]))
       throw new Error(`Invalid local path: ${key}`);
   return c;
@@ -64,6 +82,7 @@ export function loadConfig(path?: string): Config {
     c.reportPath = resolve(directory, c.reportPath);
     if (c.databasePath !== ":memory:")
       c.databasePath = resolve(directory, c.databasePath);
+    c.authPath = resolve(directory, c.authPath);
   }
   return c;
 }

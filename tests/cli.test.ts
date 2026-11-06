@@ -248,3 +248,71 @@ test("malformed request target returns 400 without an unhandled rejection", asyn
   assert.match(stdout, /HTTP\/1.1 400/);
   assert.doesNotMatch(stderr, /UNHANDLED_URL/);
 });
+test("auth status CLI is local, redacted, and does not create credentials", async () => {
+  const { existsSync } = await import("node:fs");
+  const { randomUUID } = await import("node:crypto");
+  const folder = new URL(
+    "../reports/auth-cli-" + randomUUID() + "/",
+    import.meta.url,
+  );
+  await mkdir(folder, { recursive: true });
+  const config = new URL("config.json", folder);
+  await writeFile(config, JSON.stringify({ authPath: "private/session.json" }));
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "./tests/network-guard.ts",
+      "src/auth-cli.ts",
+      "status",
+      "--config",
+      config.pathname,
+    ],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), { state: "login-required" });
+  assert.equal(existsSync(new URL("private/session.json", folder)), false);
+});
+test("API-key CLI refuses missing server credentials without discovering models or logging in", async () => {
+  const { randomUUID } = await import("node:crypto");
+  const config = new URL(
+    "../reports/api-cli-" + randomUUID() + ".json",
+    import.meta.url,
+  );
+  await mkdir(new URL("../reports/", import.meta.url), { recursive: true });
+  await writeFile(
+    config,
+    JSON.stringify({
+      upstream: "openai-api-key",
+      model: "test-model",
+      port: 0,
+      databasePath: ":memory:",
+    }),
+  );
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "./tests/network-guard.ts",
+      "src/cli.ts",
+      "--config",
+      config.pathname,
+    ],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        GATEWAY_LOCAL_API_KEY: "test-local-key-private",
+      },
+    },
+  );
+  assert.notEqual(child.status, 0);
+  assert.match(child.stderr, /OPENAI_API_KEY/);
+  assert.doesNotMatch(child.stderr, /OFFLINE_NETWORK_DENIED/);
+});

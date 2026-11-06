@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 /** Keep SDK constructor defaults from consulting the host credential environment. */
-export function offlineSDK(fetch: typeof globalThis.fetch): OpenAI {
+export function isolatedSDK(fetch: typeof globalThis.fetch): OpenAI {
   const environment = process.env;
   try {
     // Synchronous, before the server starts. Do not inspect or copy host variables.

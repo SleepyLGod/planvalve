@@ -17,7 +17,13 @@ root = Path(__file__).resolve().parents[1]
 master, slave = pty.openpty()
 original = termios.tcgetattr(slave)
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 110, 0, 0))
-child = subprocess.Popen([sys.argv[1], '--import', './tests/network-guard.ts', 'src/status-cli.ts', '--url', sys.argv[2]], cwd=root, stdin=slave, stdout=slave, stderr=slave, env={'PATH':'/usr/bin:/bin', 'TERM':'xterm-256color','NO_COLOR':'1'}, start_new_session=True)
+guard = (root / 'tests' / 'network-guard.ts').as_uri()
+local = '--local-root' in sys.argv
+if local:
+    root = Path(sys.argv[sys.argv.index('--local-root') + 1]).resolve()
+command = [sys.argv[1], 'src/local-cli.ts', 'status'] if local else [sys.argv[1], '--import', guard, 'src/status-cli.ts', '--url', sys.argv[2]]
+environment = {'PATH':'/usr/bin:/bin', 'TERM':'xterm-256color', 'NO_COLOR':'1', 'NODE_OPTIONS':f'--import {guard}'}
+child = subprocess.Popen(command, cwd=root, stdin=slave, stdout=slave, stderr=slave, env=environment, start_new_session=True)
 output = bytearray()
 
 def wait_for(value: bytes, timeout: float = 6.0) -> None:

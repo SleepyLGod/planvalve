@@ -19,6 +19,7 @@ export function translate(
   value: unknown,
   profile: "strict" | "lotus",
   model = "offline-model",
+  protocol: "responses" | "chat" = "responses",
 ): {
   payload: ObjectValue;
   validateText: (text: string) => void;
@@ -47,6 +48,13 @@ export function translate(
     "stream",
     "n",
   ]);
+  const standard = new Set([
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "max_completion_tokens",
+  ]);
+  if (protocol === "chat") for (const key of standard) accepted.add(key);
   for (const [key, v] of Object.entries(value)) {
     if (accepted.has(key)) continue;
     if (profile === "lotus" && omit.has(key))
@@ -71,16 +79,25 @@ export function translate(
     )
       invalid("Only text messages with role and content are supported");
     return {
-      role: message.role === "system" ? "developer" : message.role,
+      role:
+        protocol === "responses" && message.role === "system"
+          ? "developer"
+          : message.role,
       content: message.content,
     };
   });
-  const payload: ObjectValue = {
-    model,
-    input,
-    store: false,
-    stream: true,
-  };
+  const payload: ObjectValue =
+    protocol === "responses"
+      ? { model, input, store: false, stream: true }
+      : { model, messages: input, stream: false };
+  if (protocol === "chat")
+    for (const key of standard) {
+      if (value[key] !== undefined) {
+        if (typeof value[key] !== "number" || !Number.isFinite(value[key]))
+          invalid(`Invalid ${key}`);
+        payload[key] = value[key];
+      }
+    }
   let jsonMode = false;
   let validator: ValidateFunction | undefined;
   if (value.response_format !== undefined) {
@@ -113,6 +130,11 @@ export function translate(
       jsonMode = true;
       payload.text = { format: { type: "json_schema", ...s } };
     } else invalid("Unsupported response_format");
+  }
+  if (protocol === "chat") {
+    delete payload.text;
+    if (value.response_format !== undefined)
+      payload.response_format = value.response_format;
   }
   return {
     payload,

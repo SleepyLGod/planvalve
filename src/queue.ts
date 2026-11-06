@@ -29,7 +29,7 @@ export class Queue {
         new GatewayError(
           503,
           "gateway_paused",
-          "The offline sender is paused or closed",
+          "The local sender is paused or closed",
         ),
       );
     if (this.jobs.length >= this.capacity)

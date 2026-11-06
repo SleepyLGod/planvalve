@@ -1,6 +1,27 @@
 export type Language = "zh" | "en";
 const english: Record<string, string> = {
   模型网关: "Model gateway",
+  "官方订阅 · 用户授权": "ChatGPT plan · User authorization",
+  "OpenAI API · 用户密钥": "OpenAI API · User key",
+  本地预算: "Local budget",
+  授权: "Auth",
+  账号余额: "Account balance",
+  实际费用: "Actual cost",
+  暂停原因: "Pause reason",
+  configured: "Configured",
+  authorized: "Authorized",
+  "refresh-required": "Refresh required",
+  "login-required": "Login required",
+  closed: "Closed",
+  发送上游: "Dispatched",
+  未发送: "Not sent",
+  响应头: "Response headers",
+  首个文本: "First text",
+  完成事件: "Terminal event",
+  结束原因: "End reason",
+  上游信息: "Upstream",
+  上游请求: "Upstream request",
+  错误码: "Error code",
   "离线模拟 · 无真实调用": "Offline fixture · No real API",
   正在连接本地网关: "Connecting to local gateway",
   "连接中断 · 等待本地网关": "Disconnected · Waiting for gateway",
@@ -84,7 +105,17 @@ const english: Record<string, string> = {
 };
 export function ui(language: Language = "zh") {
   const t = (text: string): string =>
-    language === "en" ? (english[text] ?? text) : text;
+    language === "en"
+      ? (english[text] ?? text)
+      : ((
+          {
+            configured: "已配置",
+            authorized: "已授权",
+            "refresh-required": "需要续期",
+            "login-required": "需要登录",
+            closed: "已关闭",
+          } as Record<string, string>
+        )[text] ?? text);
   const count = (value: unknown): string =>
     typeof value === "number" ? value.toLocaleString("en-US") : t("未知");
   const duration = (start?: string, end?: string): string => {

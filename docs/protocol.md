@@ -1,30 +1,41 @@
-# 协议与实现边界
+# Protocol and API
 
-HTTP 入口 → 校验/转换 → 单 FIFO 队列 → 官方 OpenAI JS SDK → 自定义 mock fetch → 本地 SSE fixture → 终止状态及 usage → 输出校验 → Chat Completions。
+Client → validate → FIFO queue → explicit upstream → completed text/JSON + server usage → SQLite persistence → Chat Completions response.
 
-模块按职责划分：config 读取设置，compatibility 处理消息/JSON schema/usage，queue 控制时序，mock 提供响应，sdk 隔离 SDK 默认环境，gateway 组织 HTTP 与账本，cli 负责启动及报告。SQLite 保存历史，独立监控客户端只读查询状态；不包含插件框架、数据库服务、鉴权系统、Tailscale 或 agent 执行能力。
+## Upstreams
 
-- `/healthz` 仅存活信息；`/v1/models` 默认仅 offline-model；独立 probe 返回本次实际选择的模型。
-- `/v1/chat/completions` 支持 system/developer/user/assistant 的字符串消息，客户端 stream=false、n=1；system 只改变角色为 developer，不追加内容。
-- 支持文本、json_object、json_schema。JSON schema 使用 Ajv 的 Draft 7 校验；不支持的 schema/format/关键词明确拒绝，不静默假装已校验。JSON 语法不修补。
-- 请求正文上限 1 MiB；fixture 输出文本上限约 2 MiB 字符。本地 fixture 是拥有者提供的受信任测试材料，不是远程报文入口。
-- 模拟请求地址使用 offline.invalid，但 SDK 的 fetch 完全被内存实现取代，地址不会解析或连接；默认路径没有真实传输；独立 probe 可显式注入固定官方地址的传输，要求 maxRequests 为 1 或 2，不能通过常规配置启用。SDK 构造在同步的空环境边界内完成，随后恢复原环境引用，不读取或复制主机凭证默认值。
-- 完成必须是 response.completed 且 status=completed；从 delta 累积文本，兼容最终 output=[] 和缺少 Content-Type。终止后仍读取完流；done 文本不一致则报错。
-- raw usage 先于 JSON 结果校验记录，失败结果也不会抹去已取得的用量。input/output/total 非负且相加一致才纳入可靠总量。只有细分缺失时成功但标 partial，字段省略而非零。
-- 归一化为 prompt_tokens、completion_tokens、total_tokens、prompt_tokens_details.cached_tokens、completion_tokens_details.reasoning_tokens。额外 attribution/cache-write 留在原始 usage 中。
-- 排队取消/过期不占模拟上游次数；已开始的客户端断开不触发补发，继续收尾记账。断流/绝对超时为 unknown，并暂停后续发送。正常失败为 failed；没有失败修复或重试。
-- 未发送时检查请求数和已观测 token 预算。队列满、过期和预算耗尽有明确错误码。SDK retry 提示头不能替代发送器本身的停止控制。
-- SQLite 保存各运行及请求的最后成功写入状态；记录包含模型和输出格式，不保存消息/结果正文。完成记录持久化成功后才返回成功；存储写入失败则暂停并返回 storage_unavailable。
-- 运行时队列、当前预算保持进程内语义；SQLite 的历史记录不自动恢复为待执行任务。CLI 的 JSON 快照继续保留为导出。
+- Offline: SDK custom fetch serves the reconstructed local Responses fixture; no DNS or upstream socket.
+- ChatGPT subscription: official `POST https://api.openai.com/v1/responses`, OAuth bearer, `store:false`, `stream:true`. Text messages stay ordered; system becomes developer. No additional agent instructions, files or history.
+- API Key: official `POST https://api.openai.com/v1/chat/completions`, explicit server API key, `stream:false`. Roles and supported standard parameters remain intact. No Responses conversion is applied.
 
-HTTP 网关离线通过，不等于已经接入真实订阅，更不等于所有 agent-memory benchmark 在不改配置的情况下兼容。当前 mock 输出和 usage 不随输入变化。
+SDK constructors cannot inherit host credential defaults; requests use explicit transports. Destinations are fixed, redirects and retries are disabled. No browser login, model catalog request or test inference occurs during ordinary startup.
 
-## 只读状态接口
+## Client contract
 
-只在现有 loopback HTTP 服务内提供：
+`GET /healthz`, `GET /v1/models`, `POST /v1/chat/completions`.
 
-- `GET /_gateway/status`：mode、asOf、runId、startedAt；queue 包含 concurrency/running/waiting/capacity/paused/closed 及期限设置；budget 包含请求与 token 的 used/limit/remaining；usage 包含核心总量及 cached/reasoning/cacheWrite 的 knownTokens、unknownRequests；storage 标记健康状态。总计只累加可靠核心 usage，细分不重复计入。
-- `GET /_gateway/requests?run_id=...&limit=50&before=...`：run_id 可省略以查询全部历史；limit 为 1–200，before 为正整数数据库游标，最新优先。返回 items 与 nextCursor（无后续页为 null）。读操作不更新数据库或 JSON 快照。
-- `GET /_gateway/requests/:id`：返回单条完整账本记录，额外包含 cursor、runId、historical、lastKnownState；不存在返回 404。旧运行状态必须按最后已知状态解释。
+Accept a single configured model, nonempty string-content system/developer/user/assistant messages, n omitted or 1, and stream omitted or false. Output formats: text, json_object, json_schema. Validate JSON/schema locally without repair requests. Tools, images, streaming clients and unknown parameters are rejected. The model list is configured state, not an upstream eligibility result.
 
-监控使用同一组只读接口；不会进入模型队列。TUI 每次查询完成后等待一秒刷新，不并发轮询；断连保留带时间的旧快照。Node 原生 http/https 直接访问数字 loopback，避免宿主全局 fetch 代理设置改变连接路径；不跟随任何重定向。
+API Key supports temperature, top_p, max_tokens and max_completion_tokens. Subscription strict rejects unsupported parameters; the optional LOTUS profile records explicit omissions, not enforced settings. Supported fields have the same meaning regardless of client library.
+
+Responses reads text deltas and the terminal event, captures usage, and cancels remaining stream reading. Success requires response.completed/status=completed and valid output/usage. Failed/incomplete events, explicit errors, interruption and timeout remain errors. Chat Completions requires one text choice with finish_reason=stop and valid usage. A truncated or refused response is not a successful completion.
+
+Core input/output/total must be nonnegative integers with consistent sums. Chat Completions usage is preserved raw and normalized for the common ledger. Optional cache/reasoning fields remain unknown when absent; they are subsets, not extra total tokens. A failure may still have observed usage. Missing usage stops dispatch rather than creating a misleading zero.
+
+## Dispatch and failures
+
+Concurrency 1; FIFO, queue capacity/wait deadline, minimum start interval, per-run attempt/observed-token stop conditions. Tokens are checked before the next dispatch and may overshoot by the last call. No deduplication, retries, repair calls or billing fallback.
+
+Upstream errors pause dispatch and reject waiting work. Preserve safe machine codes, HTTP status, request ID and Retry-After; omit provider messages that could echo text or credentials. Subscription streamed usage-limit errors preserve their code even if the HTTP stream opened with 200. Retry-After is a diagnostic, not automatic rescheduling or a reset-time promise. Restarting resets local state, not official quota.
+
+SQLite completion must persist before HTTP success. Storage failure pauses dispatch. Old unfinished records are last-known history, never current execution or resumable work.
+
+## Monitoring and access
+
+- `GET /_gateway/status`: mode/upstream, redacted authorization state, pause reason, limits, budgets, usage completeness, unknown accountBalance/actualCost and storage health.
+- `GET /_gateway/requests`: newest first, optional run_id and before cursor, default limit 50 / maximum 200.
+- `GET /_gateway/requests/:id`: detail, original usage, parameter changes, upstream metadata, inferenceDispatched/dispatchedAt, headersAt/firstTextAt/terminalAt/finishedAt and endReason. The first text time is unknown for buffered non-streaming API responses.
+
+Monitoring does not dispatch, charge budgets or rewrite JSON exports. Real model/history/status routes require the independent local bearer key and matching loopback Host/Origin. Health exposes only mode/health. All listeners bind to 127.0.0.1. Local monitoring never follows redirects or uses a host proxy.
+
+Timestamp fields are optional for older history. There is no migration that rewrites old records or invents missing timestamps. SQLite's existing run/request JSON format is retained.

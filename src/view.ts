@@ -135,11 +135,42 @@ function detailLines(
     ),
     pair(t("接收时间"), clock(r.receivedAt, true), w),
     pair(
+      t("发送上游"),
+      r.inferenceDispatched === false
+        ? t("未发送")
+        : r.dispatchedAt
+          ? clock(r.dispatchedAt, true)
+          : t("未知"),
+      w,
+    ),
+    pair(
       t("等待耗时"),
       duration(r.receivedAt, r.startedAt ?? r.finishedAt ?? now),
       w,
     ),
     pair(t("执行耗时"), duration(r.startedAt, r.finishedAt ?? now), w),
+    pair(
+      t("响应头"),
+      r.headersAt ? duration(r.startedAt, r.headersAt) : t("未知"),
+      w,
+    ),
+    pair(
+      t("首个文本"),
+      r.firstTextAt ? duration(r.startedAt, r.firstTextAt) : t("未知"),
+      w,
+    ),
+    pair(
+      t("完成事件"),
+      r.terminalAt ? duration(r.startedAt, r.terminalAt) : t("未知"),
+      w,
+    ),
+    pair(
+      t("结束原因"),
+      r.endReason === "completed"
+        ? stateLabel("completed")
+        : (r.endReason ?? t("未知")),
+      w,
+    ),
     pair(t("模型"), r.model ?? t("未知"), w),
     pair(t("输出格式"), format[r.outputFormat ?? "text"] ?? t("其他"), w),
   ];
@@ -180,6 +211,19 @@ function detailLines(
       width,
     ),
   );
+  if (r.upstreamHttp)
+    lines.push(
+      ...panel(
+        t("上游信息"),
+        [
+          pair("HTTP", count(r.upstreamHttp.status), w),
+          pair(t("上游请求"), r.upstreamHttp.requestId ?? t("未知"), w),
+          pair("Retry-After", r.upstreamHttp.retryAfter ?? t("未知"), w),
+          pair(t("错误码"), r.error ?? "—", w),
+        ],
+        width,
+      ),
+    );
   if (r.error) lines.push(" " + t("请求未成功；按 R 查看原始错误码。"));
   lines.push(" " + t("缓存命中属于输入，推理属于输出，均不重复计入总计。"));
   return lines;
@@ -251,7 +295,11 @@ export function render(
       t(
         data?.status.mode === "subscription-probe"
           ? "官方订阅 · 真实测试"
-          : "离线模拟 · 无真实调用",
+          : data?.status.mode === "chatgpt-subscription"
+            ? "官方订阅 · 用户授权"
+            : data?.status.mode === "openai-api-key"
+              ? "OpenAI API · 用户密钥"
+              : "离线模拟 · 无真实调用",
       ),
       width,
     ),
@@ -329,7 +377,7 @@ export function render(
             pair(t("输入"), count(s.usage.inputTokens), rw - 4),
             pair(t("输出"), count(s.usage.outputTokens), rw - 4),
             pair(t("总计"), count(s.usage.totalTokens), rw - 4),
-            pair(t("剩余额度"), lim(s.budget.tokens.remaining), rw - 4),
+            pair(t("本地预算"), lim(s.budget.tokens.remaining), rw - 4),
           ],
           rw,
         );
@@ -354,6 +402,13 @@ export function render(
         ` ${t("启动间隔")} ${s.queue.minStartIntervalMs} ${t("毫秒")} · ${t("历史存储")} ${s.storage.healthy ? t("正常") : t("异常")} · ${t("本次运行")} ${s.runId.slice(0, 8)}`,
         "90",
       );
+      if (s.mode === "openai-api-key" || s.mode === "chatgpt-subscription") {
+        line(
+          ` ${t("授权")} ${t(s.authorization?.state ?? "未知")} · ${t("账号余额")} ${t("未知")} · ${t("实际费用")} ${t("未知")}`,
+        );
+        if (s.pauseReason)
+          line(` ${t("暂停原因")} ${safeText(s.pauseReason)}`, "33");
+      }
       line("");
       line(
         sides(

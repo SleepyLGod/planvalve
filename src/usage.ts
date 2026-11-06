@@ -12,7 +12,7 @@ export function summarizeUsage(records: LedgerRecord[]) {
     cacheWrite: { knownTokens: 0, unknownRequests: 0 },
   };
   for (const r of records) {
-    if (!r.startedAt) continue;
+    if (!r.startedAt || r.inferenceDispatched === false) continue;
     if (r.usage) {
       result.inputTokens += Number(r.usage.prompt_tokens);
       result.outputTokens += Number(r.usage.completion_tokens);
@@ -23,7 +23,11 @@ export function summarizeUsage(records: LedgerRecord[]) {
     const details = [
       ["cached", r.usage?.prompt_tokens_details, "cached_tokens"],
       ["reasoning", r.usage?.completion_tokens_details, "reasoning_tokens"],
-      ["cacheWrite", r.rawUsage?.input_tokens_details, "cache_write_tokens"],
+      [
+        "cacheWrite",
+        r.rawUsage?.input_tokens_details ?? r.rawUsage?.prompt_tokens_details,
+        "cache_write_tokens",
+      ],
     ] as const;
     for (const [name, detail, key] of details) {
       const n = object(detail) ? detail[key] : undefined;
