@@ -191,3 +191,35 @@ test("English mode translates both overview and details without changing token a
     await gateway.close();
   }
 });
+test("real upstream labels, auth, local budget and pause information are translated and never described as fixture usage", async () => {
+  const gateway = createGateway({ port: 0, databasePath: ":memory:" });
+  try {
+    const status = {
+      ...gateway.status(),
+      mode: "openai-api-key" as const,
+      upstream: "openai-api-key" as const,
+      authorization: { state: "configured" },
+      pauseReason: "rate_limit_exceeded",
+    };
+    const data = { status, page: { items: [], nextCursor: null } };
+    const en = render(data, initialView(), {
+      width: 120,
+      color: false,
+      lang: "en",
+    });
+    assert.match(en, /OpenAI API/);
+    assert.match(en, /Configured/);
+    assert.match(en, /rate_limit_exceeded/);
+    assert.match(en, /Account balance.*Unknown/);
+    assert.doesNotMatch(en, /[\u3400-\u9fff]|Offline fixture/);
+    const zh = render(data, initialView(), {
+      width: 120,
+      color: false,
+      lang: "zh",
+    });
+    assert.match(zh, /本地预算/);
+    assert.match(zh, /账号余额/);
+  } finally {
+    await gateway.close();
+  }
+});

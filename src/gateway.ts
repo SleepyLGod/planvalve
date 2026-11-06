@@ -1,11 +1,16 @@
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
-import { randomUUID, createHash } from "node:crypto";
-import OpenAI from "openai";
+import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
+import {
+  officialUpstream,
+  responsesText,
+  type CredentialSource,
+} from "./upstream.ts";
+import { Redactor } from "./privacy.ts";
 import { History } from "./history.ts";
 import { summarizeUsage } from "./usage.ts";
 import type { StatusSnapshot } from "./types.ts";
-import { offlineSDK } from "./sdk.ts";
+import { isolatedSDK } from "./sdk.ts";
 import { validateConfig } from "./config.ts";
 import { translate, normalizeUsage, object } from "./compatibility.ts";
 import { MockTransport, type MockOptions } from "./mock.ts";
@@ -21,23 +26,76 @@ export type { Fixture } from "./types.ts";
 export function createGateway(
   options: Partial<Config> & MockOptions & { fixture?: Fixture } = {},
   probe?: { model: string; fetch: typeof globalThis.fetch },
+  runtime: {
+    fetch?: typeof fetch;
+    apiKey?: string;
+    localKey?: string;
+    subscription?: CredentialSource;
+  } = {},
 ) {
   const { fixture, chunkSize, contentType, mockDelayMs, ...configuration } =
     options;
   const config = validateConfig(configuration);
   if (probe && (config.maxRequests === null || config.maxRequests > 2))
     throw new Error("A live probe requires maxRequests of 1 or 2");
+  if (probe && config.upstream !== "offline")
+    throw new Error("Probe cannot select a persistent upstream");
+  const real = config.upstream !== "offline";
+  const redact = new Redactor();
+  const localKey = real
+    ? (runtime.localKey ?? process.env.GATEWAY_LOCAL_API_KEY)
+    : undefined;
+  if (
+    real &&
+    (!localKey ||
+      localKey.length < 16 ||
+      /[\s\u0000-\u001f\u007f]/.test(localKey))
+  )
+    throw new Error(
+      "Set GATEWAY_LOCAL_API_KEY to a private value of at least 16 characters",
+    );
+  redact.add(localKey);
+  const apiKey =
+    config.upstream === "openai-api-key"
+      ? (runtime.apiKey ?? process.env.OPENAI_API_KEY)
+      : undefined;
+  if (config.upstream === "openai-api-key" && !apiKey)
+    throw new Error("Set OPENAI_API_KEY explicitly");
+  redact.add(apiKey);
+  if (config.upstream === "chatgpt-subscription" && !runtime.subscription)
+    throw new Error("Initialize subscription authorization before serving");
+  const credential: CredentialSource | undefined =
+    config.upstream === "openai-api-key"
+      ? {
+          accessToken: async () => apiKey!,
+          status: () => ({ state: "configured" }),
+          close() {},
+        }
+      : runtime.subscription;
+  const upstream = real
+    ? officialUpstream(
+        config.upstream as "openai-api-key" | "chatgpt-subscription",
+        credential!,
+        runtime.fetch ?? globalThis.fetch,
+        redact,
+      )
+    : undefined;
   const mode = probe
     ? ("subscription-probe" as const)
-    : ("offline-only" as const);
-  const model = probe?.model ?? "offline-model";
+    : real
+      ? (config.upstream as "chatgpt-subscription" | "openai-api-key")
+      : ("offline-only" as const);
+  const model = probe?.model ?? config.model ?? "offline-model";
   const tape: Fixture =
-    fixture ?? JSON.parse(readFileSync(config.fixturePath, "utf8"));
+    fixture ??
+    (real
+      ? { events: [] }
+      : JSON.parse(readFileSync(config.fixturePath, "utf8")));
   if (!Array.isArray(tape.events))
     throw new Error("Fixture must contain parsed events");
   const mock = new MockTransport(tape, { chunkSize, contentType, mockDelayMs });
   // The default transport is a fixture. A capped probe supplies its own explicit fetch; host credentials are never read.
-  const client = offlineSDK(probe?.fetch ?? mock.fetch);
+  const client = real ? undefined : isolatedSDK(probe?.fetch ?? mock.fetch);
   const queue = new Queue(
     config.queueCapacity,
     config.maxQueueWaitMs,
@@ -59,11 +117,14 @@ export function createGateway(
     throw error;
   }
   let storageError: string | undefined;
+  let pauseReason: string | undefined;
   const persist = (record: LedgerRecord) => {
     try {
+      Object.assign(record, redact.value(record));
       history.save(runId, record);
     } catch {
       storageError = "SQLite write failed";
+      pauseReason = "storage_unavailable";
       queue.pause();
       throw new GatewayError(
         503,
@@ -82,6 +143,13 @@ export function createGateway(
     });
     return {
       mode,
+      upstream: config.upstream,
+      authorization: credential?.status() ?? {
+        state: probe ? "memory-only-probe" : "not-required",
+      },
+      pauseReason,
+      accountBalance: "unknown",
+      actualCost: "unknown",
       asOf: new Date().toISOString(),
       runId,
       startedAt,
@@ -110,12 +178,17 @@ export function createGateway(
   };
   const report = () => ({
     mode,
-    transport: probe ? "official-responses-probe" : "in-process-fixture",
-    realApiSupported: !!probe,
+    transport: probe
+      ? "official-responses-probe"
+      : real
+        ? config.upstream
+        : "in-process-fixture",
+    realApiSupported: !!probe || real,
     paused: queue.paused,
-    mockAttempts: probe ? 0 : attempts,
-    realAttempts: probe ? attempts : 0,
-    upstreamMaxActive: probe ? undefined : mock.maxActive,
+    pauseReason,
+    mockAttempts: probe || real ? 0 : attempts,
+    realAttempts: probe || real ? attempts : 0,
+    upstreamMaxActive: probe || real ? undefined : mock.maxActive,
     runId,
     totals: summarizeUsage(records),
     records,
@@ -137,6 +210,38 @@ export function createGateway(
         error: { code: "invalid_target", message: "Invalid request target" },
       });
       return;
+    }
+    if (real) {
+      const expectedHost = `127.0.0.1:${(server.address() as { port: number } | null)?.port}`;
+      if (
+        req.headers.host !== expectedHost ||
+        (req.headers.origin !== undefined &&
+          req.headers.origin !== `http://${expectedHost}`)
+      ) {
+        reply(403, {
+          error: {
+            code: "invalid_origin",
+            message: "Only the local gateway origin is accepted",
+          },
+        });
+        return;
+      }
+      if (endpoint.pathname !== "/healthz") {
+        const actual = Buffer.from(req.headers.authorization ?? "");
+        const expected = Buffer.from("Bearer " + localKey);
+        if (
+          actual.length !== expected.length ||
+          !timingSafeEqual(actual, expected)
+        ) {
+          reply(401, {
+            error: {
+              code: "invalid_local_key",
+              message: "Local gateway authorization required",
+            },
+          });
+          return;
+        }
+      }
     }
     if (endpoint.pathname.startsWith("/_gateway/") && req.method === "GET") {
       res.setHeader("cache-control", "no-store");
@@ -212,7 +317,11 @@ export function createGateway(
           {
             id: model,
             object: "model",
-            owned_by: probe ? "chatgpt-subscription" : "local-fixture",
+            owned_by: real
+              ? config.upstream
+              : probe
+                ? "chatgpt-subscription"
+                : "local-fixture",
           },
         ],
       });
@@ -258,11 +367,17 @@ export function createGateway(
           "Request is not valid JSON",
         );
       }
-      const translated = translate(body, config.profile, model);
+      const translated = translate(
+        body,
+        config.profile,
+        model,
+        config.upstream === "openai-api-key" ? "chat" : "responses",
+      );
       record = {
         id: randomUUID(),
         sequence: records.length + 1,
         status: "queued",
+        inferenceDispatched: false,
         receivedAt: new Date().toISOString(),
         requestHash: createHash("sha256")
           .update(JSON.stringify(body))
@@ -297,94 +412,28 @@ export function createGateway(
           current.startedAt = undefined;
           throw error;
         }
-        attempts++;
+        if (!upstream) {
+          attempts++;
+          current.dispatchedAt = new Date().toISOString();
+          current.inferenceDispatched = true;
+        }
         const signal = AbortSignal.timeout(config.upstreamTimeoutMs);
         try {
-          let terminal: Record<string, unknown> | undefined;
-          let text = "";
-          let doneText: string | undefined;
-          const stream = await client.responses.create(
-            translated.payload as unknown as OpenAI.Responses.ResponseCreateParamsStreaming,
-            { signal },
-          );
-          for await (const event of stream) {
-            if (event.type === "response.output_text.delta")
-              text += event.delta;
-            else if (event.type === "response.output_text.done")
-              doneText = event.text;
-            else if (
-              event.type === "response.completed" ||
-              event.type === "response.failed" ||
-              event.type === "response.incomplete"
-            ) {
-              if (terminal)
-                throw new GatewayError(
-                  502,
-                  "invalid_stream",
-                  "Multiple terminal events",
-                );
-              terminal = event as unknown as Record<string, unknown>;
-              if (object(terminal.response)) {
-                if (object(terminal.response.error))
-                  current.upstreamError = structuredClone(
-                    terminal.response.error,
-                  );
-                if (object(terminal.response.incomplete_details))
-                  current.upstreamIncompleteDetails = structuredClone(
-                    terminal.response.incomplete_details,
-                  );
-              }
-              const raw = object(terminal.response)
-                ? terminal.response.usage
-                : undefined;
-              if (object(raw)) {
-                current.rawUsage = structuredClone(raw);
-                try {
-                  const normalized = normalizeUsage(raw);
-                  current.usage = normalized.usage;
-                  current.usageCompleteness = normalized.completeness;
-                } catch {
-                  current.usageCompleteness = "missing";
-                }
-              }
-            } else if (event.type === "error")
-              throw new GatewayError(
-                502,
-                "upstream_failed",
-                "Explicit error event",
-              );
-            if (text.length > 2 * 1024 * 1024)
-              throw new GatewayError(
-                502,
-                "response_too_large",
-                "Fixture text exceeds 2 MiB",
-              );
-          }
-          if (!terminal)
-            throw new GatewayError(
-              502,
-              "stream_interrupted",
-              "Stream ended without a terminal event",
-            );
-          if (
-            terminal.type !== "response.completed" ||
-            !object(terminal.response) ||
-            terminal.response.status !== "completed"
-          )
-            throw new GatewayError(
-              502,
-              "upstream_failed",
-              "Upstream did not complete normally",
-            );
-          if (doneText !== undefined && text !== doneText)
-            throw new GatewayError(
-              502,
-              "invalid_stream",
-              "Text deltas disagree with done text",
-            );
-          if (!current.usage) normalizeUsage(current.rawUsage);
+          const text = upstream
+            ? await upstream.complete(
+                translated.payload,
+                signal,
+                current,
+                () => {
+                  persist(current);
+                  attempts++;
+                  queue.lastStart = Date.now();
+                },
+              )
+            : await responsesText(client!, translated.payload, signal, current);
           translated.validateText(text);
           current.status = "completed";
+          current.endReason = "completed";
           return {
             id: "chatcmpl-" + current.id,
             object: "chat.completion",
@@ -400,13 +449,21 @@ export function createGateway(
             usage: current.usage,
           };
         } catch (error) {
+          current.endReason = signal.aborted
+            ? "timeout"
+            : error instanceof GatewayError
+              ? error.code
+              : "stream_interrupted";
+          pauseReason = current.endReason;
           queue.pause();
           current.status =
-            signal.aborted ||
-            !(error instanceof GatewayError) ||
-            error.code === "stream_interrupted"
-              ? "unknown"
-              : "failed";
+            current.inferenceDispatched === false
+              ? "failed"
+              : signal.aborted ||
+                  !(error instanceof GatewayError) ||
+                  error.code === "stream_interrupted"
+                ? "unknown"
+                : "failed";
           throw error instanceof GatewayError
             ? error
             : new GatewayError(
@@ -456,6 +513,11 @@ export function createGateway(
         record.error = "storage_unavailable";
         if (record.status === "completed") record.status = "unknown";
       }
+      if (
+        record?.upstreamHttp?.retryAfter &&
+        /^[\x20-\x7e]{1,200}$/.test(record.upstreamHttp.retryAfter)
+      )
+        res.setHeader("retry-after", record.upstreamHttp.retryAfter);
       reply(e.status, {
         error: {
           type: "gateway_error",
@@ -498,6 +560,7 @@ export function createGateway(
           if (!storageError) history.finish(runId);
         } finally {
           history.close();
+          credential?.close();
         }
       })()),
   };

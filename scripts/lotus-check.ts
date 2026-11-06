@@ -57,7 +57,7 @@ try {
     JSON.stringify(gateway.report(), null, 2) + "\n",
     { mode: 0o600 },
   );
-  if (code !== 0 || gateway.mock.calls !== 2) process.exitCode = 1;
+  if (code !== 0 || gateway.mock.calls !== 3) process.exitCode = 1;
 } finally {
   await gateway.close();
 }

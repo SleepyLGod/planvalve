@@ -1,0 +1,10 @@
+{
+  "upstream": "openai-api-key",
+  "model": "CHOOSE_AN_ELIGIBLE_MODEL",
+  "profile": "strict",
+  "minStartIntervalMs": 3000,
+  "maxRequests": 1000,
+  "stopAfterTokens": 100000,
+  "databasePath": "./data/gateway.sqlite",
+  "reportPath": "./reports/latest.json"
+}

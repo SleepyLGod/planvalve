@@ -22,3 +22,5 @@ Evidence is saved under a new `reports/subscription-probe-TIMESTAMP/` directory:
 This is a bounded integration check, not a persistent authenticated service or a full LOTUS benchmark. Offline tests cannot establish live success; read that run's result.json for the actual outcome.
 
 Official references: [registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
+
+The probe now reuses the shared OAuth/identity implementation with an in-memory store. Persistent service credentials are not read or imported. A successful probe still sends at most two requests, has no automatic retry, and keeps its non-bearer registration metadata separate. New stage timestamps diagnose future calls; the old 90-second observation remains unconfirmed.

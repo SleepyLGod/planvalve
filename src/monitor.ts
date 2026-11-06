@@ -27,6 +27,7 @@ export async function readMonitor(
   scope: "current" | "all",
   before?: number,
   signal?: AbortSignal,
+  localKey = process.env.GATEWAY_LOCAL_API_KEY,
 ): Promise<MonitorData> {
   const base = localOrigin(origin);
   const get = async <T>(path: string): Promise<T> => {
@@ -38,6 +39,9 @@ export async function readMonitor(
         url,
         {
           agent: false,
+          ...(localKey
+            ? { headers: { authorization: "Bearer " + localKey } }
+            : {}),
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         },
         (response) => {

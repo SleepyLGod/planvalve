@@ -1,20 +1,19 @@
-# Publication privacy review
+# Publication review
 
-The intended destination is a private repository under the maintainer's personal account. Organization repositories and organization authorization are outside this task. The broad GitHub CLI browser authorization was cancelled; any upload must use the explicitly selected personal destination.
+The project is intended for users to run locally with their own subscription or API key. MIT licensing permits reuse; this is not a hosted account-sharing service or an OpenAI endorsement. Upstream terms and policies still apply.
 
-## Changes before the first commit
+The implementation initially left its changes uncommitted and the remote repository private. The separately authorized closeout saves the reviewed changes on the private development branch; it does not merge main, release or make the repository public. Existing author email is retained as requested; making the repository public would expose the normal commit metadata.
 
-- Removed workstation-specific home paths from source, scripts, tests and README instructions.
-- The default tests use an available Python interpreter rather than a separate private repository's environment. The optional LOTUS environment and source checkout are explicitly configured by the caller.
-- Kept runtime registration identifiers, identity hashes, SQLite databases, raw response/usage reports, caches, terminal captures and implementation notes local and ignored.
-- Added environment/key/database ignore rules. Staging uses an explicit source/documentation list, not a bulk force-add.
-- Replaced local-report documentation links with standalone verification descriptions, and added bilingual quick starts, data-handling notes and troubleshooting.
-- Kept the project private and unlicensed rather than granting an unsolicited open-source license.
+## Review before any publication
 
-## What was checked
+Inspect the exact candidate source and reachable published history for keys, JWTs, private-key material, real registration IDs, identity records, private home paths and runtime files. Inspect screenshots separately. Automated patterns cannot prove all sensitive information absent.
 
-The initial staging review inspected the exact Git index, checked that local data/report/credential paths are ignored, and scanned for private home paths, common OpenAI/GitHub token shapes, JWTs, private-key blocks and concrete runtime registration identifiers. No matching credential or personal home path was found in the candidate source/documentation files. Local audit details stay in ignored reports.
+Runtime credentials, databases, reports, caches, environment files and local implementation notes stay ignored and local. The fixture has sanitized IDs and no account identity; it is reconstructed parsed events, not a network recording. Examples contain no real credentials and require users to select real models explicitly.
 
-The published fixture contains replaced response/message identifiers and a minimal arithmetic output; it is derived from parsed events, not an original network capture. Runtime metadata is not needed to reproduce the offline checks.
+The initial private publication contained 44 source/documentation files and two commits. That historical review is not approval of future modifications. New source uses explicit credential paths and tests fake tokens; audit findings and test evidence stay in ignored reports. See SECURITY.md for data handling.
 
-This is a scoped publication review, not proof that every possible secret format can be detected. Review future diffs and never force-add private runtime state. Registration metadata, parameter values and provider diagnostics can still be sensitive even when bearer credentials are absent. See [SECURITY.md](../SECURITY.md).
+Public-readiness work adds an MIT license, bilingual documentation, generic client examples, explicit restrictions and offline CI configuration. A configured workflow has not necessarily executed on GitHub. No force-push, organization access or remote visibility change belongs to this implementation.
+
+The 2026-11-06 candidate review covered 59 source/documentation files and the two existing published commits; common credential/JWT/private-key and personal-home-path scans had no matches. All local Markdown links resolved. This is a bounded review, not universal proof of no sensitive data.
+
+The subsequent private-branch closeout reviews the expanded 65-file candidate and exact staged tree, plus reachable history. It adds in-memory exact matching against this project's real credentials and registration values; findings report filenames/categories, never matched values. Runtime exclusions and protected local-file fingerprints are checked again before committing. The final review also corrected environment-proxy handling in local SDK examples and documented loopback exclusions for LOTUS. This remains a bounded source/history review, not a guarantee about every sensitive-data format or future change.

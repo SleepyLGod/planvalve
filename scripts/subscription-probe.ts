@@ -1,16 +1,10 @@
+import { beginLogin, type AuthRecord } from "../src/auth.ts";
 /** Independent interactive authorization; two serial requests at most; credentials never written. */
 import http from "node:http";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  randomBytes,
-  randomUUID,
-  createHash,
-  createPublicKey,
-  verify,
-  timingSafeEqual,
-} from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { createGateway } from "../src/gateway.ts";
 import { subscriptionFetch } from "../src/probe-transport.ts";
 import { render, initialView } from "../src/view.ts";
@@ -43,23 +37,21 @@ const saveRegistration = () =>
     { mode: 0o600 },
   );
 saveRegistration();
-const auth = "https://auth.openai.com",
-  api = "https://api.openai.com";
-const state = randomBytes(32).toString("base64url"),
-  nonce = randomBytes(32).toString("base64url"),
-  verifier = randomBytes(48).toString("base64url");
-const challenge = createHash("sha256").update(verifier).digest("base64url");
-const secrets = new Set([state, nonce, verifier]);
+const api = "https://api.openai.com";
+const secrets = new Set<string>();
+let authRecord: AuthRecord = {
+  version: 1,
+  ext_agent_host_id: registration.ext_agent_host_id,
+  client_id: registration.client_id,
+};
+let login: Awaited<ReturnType<typeof beginLogin>> | undefined;
 const sessionAbort = new AbortController();
 let finished = false,
-  begun = false,
-  callbackUsed = false,
   attempts = 0,
   phase = "preparing";
 let gateway: ReturnType<typeof createGateway> | undefined;
 let server: http.Server | undefined;
 let credentials: { access_token: string } | undefined;
-let expiry: ReturnType<typeof setTimeout> | undefined;
 const cases: Record<string, unknown>[] = [],
   upstream: Record<string, unknown>[] = [];
 function safe(value: unknown): string {
@@ -91,8 +83,9 @@ function status(next: string): void {
 async function finish(outcome: string, detail?: unknown): Promise<void> {
   if (finished) return;
   finished = true;
-  clearTimeout(expiry);
   sessionAbort.abort();
+  login?.cancel();
+  authRecord.credentials = undefined;
   const report = gateway?.report();
   if (gateway)
     await gateway
@@ -135,51 +128,6 @@ async function json(url: string, options: RequestInit = {}): Promise<any> {
   } catch {
     throw Error("Malformed official JSON response");
   }
-}
-function identity(token: string, clientId: string, jwks: any): any {
-  const parts = token.split(".");
-  if (parts.length !== 3) throw Error("Invalid identity token");
-  const header = JSON.parse(Buffer.from(parts[0]!, "base64url").toString()),
-    claims = JSON.parse(Buffer.from(parts[1]!, "base64url").toString());
-  if (header.alg !== "RS256")
-    throw Error("Unsupported identity signing algorithm");
-  const jwk = jwks.keys.find(
-    (key: any) =>
-      key.kid === header.kid &&
-      key.kty === "RSA" &&
-      (!key.use || key.use === "sig"),
-  );
-  if (
-    !jwk ||
-    !verify(
-      "RSA-SHA256",
-      Buffer.from(parts[0] + "." + parts[1]),
-      createPublicKey({ key: jwk, format: "jwk" }),
-      Buffer.from(parts[2]!, "base64url"),
-    )
-  )
-    throw Error("Invalid identity signature");
-  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud],
-    now = Date.now() / 1000;
-  const actual = Buffer.from(
-      typeof claims.nonce === "string" ? claims.nonce : "",
-    ),
-    expected = Buffer.from(nonce);
-  if (
-    claims.iss !== auth ||
-    !audiences.includes(clientId) ||
-    !Number.isFinite(claims.exp) ||
-    claims.exp <= now - 60 ||
-    !Number.isFinite(claims.iat) ||
-    claims.iat > now + 60 ||
-    typeof claims.sub !== "string" ||
-    !claims.sub ||
-    actual.length !== expected.length ||
-    !timingSafeEqual(actual, expected) ||
-    (audiences.length > 1 && claims.azp !== clientId)
-  )
-    throw Error("Identity issuer, audience, lifetime or nonce mismatch");
-  return claims;
 }
 function page(
   res: http.ServerResponse,
@@ -373,42 +321,46 @@ async function run(): Promise<void> {
   await finish("completed");
 }
 async function main(): Promise<void> {
-  const config = await json(auth + "/.well-known/openid-configuration");
-  if (
-    config.issuer !== auth ||
-    new URL(config.jwks_uri).origin !== auth ||
-    config.authorization_endpoint !== auth + "/api/accounts/authorize" ||
-    config.token_endpoint !== auth + "/api/accounts/oauth/token"
-  )
-    throw Error("Unexpected official authorization metadata");
-  const jwks = await json(config.jwks_uri);
-  let redirectUri = "",
-    oauthUrl = "";
-  server = http.createServer(async (req, res) => {
-    const host = "127.0.0.1:" + (server!.address() as { port: number }).port;
-    if (req.headers.host !== host) {
-      page(res, "<p>Invalid host.</p>", 400);
-      return;
-    }
-    let url: URL;
-    try {
-      url = new URL(req.url ?? "/", "http://" + host);
-    } catch {
-      page(res, "<p>Invalid URL.</p>", 400);
-      return;
-    }
+  login = await beginLogin({
+    read: () => structuredClone(authRecord),
+    save: (record) => {
+      if (record.subject) {
+        const hash = createHash("sha256").update(record.subject).digest("hex");
+        if (registration.identity_hash && registration.identity_hash !== hash)
+          throw new Error(
+            "Selected identity differs from this test registration",
+          );
+        registration.identity_hash = hash;
+      }
+      registration.client_id = record.client_id;
+      saveRegistration();
+      authRecord = structuredClone(record); // Full tokens stay in memory only.
+    },
+    acquire: () => () => {},
+  });
+  server = http.createServer((req, res) => {
+    const target = new URL(req.url ?? "/", "http://127.0.0.1");
     if (req.method !== "GET") {
       page(res, "<p>Method not allowed.</p>", 405);
       return;
     }
-    if (url.pathname === "/") {
+    if (target.pathname === "/") {
       page(
         res,
-        '<p>使用你选择的 ChatGPT 账号订阅额度，通过本地网关顺序发送最多两次最小请求：一次文本、一次 JSON。</p><p>失败不重试；不读写日常 Codex 配置；凭证只留在当前进程。</p><p>请确认选择当前 ChatGPT 账号，并在官方页面允许订阅额度使用。</p><p><a href="/begin">Continue with ChatGPT</a></p>',
+        '<p>Use your own ChatGPT plan for at most two serial requests: text, then JSON. No retries. Credentials remain in memory.</p><p><a href="/begin">Continue with ChatGPT</a></p>',
       );
       return;
     }
-    if (url.pathname === "/status") {
+    if (target.pathname === "/begin" && !finished) {
+      res.writeHead(302, {
+        location: login!.authorizationUrl,
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+      });
+      res.end();
+      return;
+    }
+    if (target.pathname === "/status") {
       res.writeHead(200, {
         "content-type": "application/json",
         "cache-control": "no-store",
@@ -416,152 +368,43 @@ async function main(): Promise<void> {
       res.end(JSON.stringify({ phase, inferenceAttempts: attempts }));
       return;
     }
-    if (url.pathname === "/begin") {
-      if (begun || finished) {
-        page(res, "<p>授权已开始或本次测试已结束。</p>", 409);
-        return;
-      }
-      begun = true;
-      status("waiting_for_user_login");
-      res.writeHead(302, {
-        location: oauthUrl,
-        "cache-control": "no-store",
-        "referrer-policy": "no-referrer",
-      });
-      res.end();
-      return;
-    }
-    if (url.pathname === "/result") {
-      page(res, "<p>授权回调已收到，测试将自动继续。请返回聊天查看结果。</p>");
-      return;
-    }
-    if (url.pathname !== "/auth/callback") {
-      page(res, "<p>Not found.</p>", 404);
-      return;
-    }
-    const actual = Buffer.from(url.searchParams.get("state") ?? ""),
-      expected = Buffer.from(state);
-    if (
-      !begun ||
-      finished ||
-      callbackUsed ||
-      actual.length !== expected.length ||
-      !timingSafeEqual(actual, expected)
-    ) {
-      page(res, "<p>无效授权状态。</p>", 400);
-      return;
-    }
-    callbackUsed = true;
-    clearTimeout(expiry);
-    res.writeHead(303, {
-      location: "/result",
-      "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
-    });
-    res.end();
-    try {
-      if (url.searchParams.has("error")) {
-        await finish("authorization_declined_or_unavailable");
-        return;
-      }
-      const code = url.searchParams.get("code"),
-        callbackId = url.searchParams.get("client_id"),
-        clientId = registration.client_id ?? callbackId;
-      if (
-        !code ||
-        !clientId ||
-        clientId === "dynamic_agent_client" ||
-        (registration.client_id &&
-          callbackId &&
-          registration.client_id !== callbackId)
-      )
-        throw Error(
-          "Issued client ID or authorization code missing/mismatched",
-        );
-      registration.client_id = clientId;
-      saveRegistration();
-      secrets.add(code);
-      status("validating_independent_authorization");
-      const result = await json(config.token_endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          client_id: clientId,
-          code,
-          code_verifier: verifier,
-          redirect_uri: redirectUri,
-          resource: api + "/v1",
-        }),
-      });
-      if (finished) return;
-      for (const key of ["access_token", "refresh_token", "id_token"])
-        if (typeof result[key] === "string") secrets.add(result[key]);
-      if (
-        typeof result.access_token !== "string" ||
-        typeof result.id_token !== "string" ||
-        result.token_type?.toLowerCase() !== "bearer"
-      )
-        throw Error("Authorization lacks verifiable token set");
-      const claims = identity(result.id_token, clientId, jwks),
-        hash = createHash("sha256").update(claims.sub).digest("hex");
-      if (registration.identity_hash && hash !== registration.identity_hash)
-        throw Error("Selected account differs from this test registration");
-      registration.identity_hash = hash;
-      saveRegistration();
-      const scopes =
-        typeof result.scope === "string" ? result.scope.split(/\s+/) : [];
-      if (
-        !scopes.includes("chatgpt.tokens.use.direct") ||
-        !scopes.includes("resource.invoke")
-      ) {
-        await finish("subscription_permission_not_granted");
-        return;
-      }
-      credentials = { access_token: result.access_token };
-      await run();
-    } catch (error) {
-      await finish("probe_error", {
-        message: safe(error instanceof Error ? error.message : String(error)),
-      });
-    }
+    page(res, "<p>Not found.</p>", 404);
   });
   await new Promise<void>((resolve, reject) => {
     server!.once("error", reject);
     server!.listen(0, "127.0.0.1", resolve);
   });
-  redirectUri =
-    "http://127.0.0.1:" +
-    (server.address() as { port: number }).port +
-    "/auth/callback";
-  const query = new URLSearchParams({
-    client_id: registration.client_id ?? "dynamic_agent_client",
-    ext_agent_host_id: registration.ext_agent_host_id,
-    response_type: "code",
-    redirect_uri: redirectUri,
-    scope:
-      "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
-    resource: api + "/v1",
-    state,
-    nonce,
-    code_challenge_method: "S256",
-    code_challenge: challenge,
-  });
-  if (!registration.client_id)
-    query.set("agent_name_hint", "ChatGPT Plan Gateway");
-  oauthUrl = config.authorization_endpoint + "?" + query;
   status("ready_for_login");
   console.log(
     JSON.stringify({
-      loginPage: redirectUri.replace("/auth/callback", "/"),
+      loginPage: `http://127.0.0.1:${(server.address() as { port: number }).port}/`,
       resultDirectory: folder,
     }),
   );
-  expiry = setTimeout(
-    () => void finish("authorization_timed_out"),
-    30 * 60 * 1000,
-  );
-  expiry.unref();
+  const cancel = () => {
+    void finish("authorization_cancelled");
+  };
+  process.once("SIGINT", cancel);
+  process.once("SIGTERM", cancel);
+  void login.done
+    .then(async () => {
+      if (finished) return;
+      const tokens = authRecord.credentials!;
+      for (const token of [
+        tokens.access_token,
+        tokens.refresh_token,
+        tokens.id_token,
+      ])
+        secrets.add(token);
+      credentials = { access_token: tokens.access_token };
+      await run();
+    })
+    .catch(async (error) => {
+      if (!finished)
+        await finish("probe_failed", {
+          message: safe(error instanceof Error ? error.message : String(error)),
+        });
+    });
 }
 main().catch(async (error) => {
   await finish("setup_failed", {

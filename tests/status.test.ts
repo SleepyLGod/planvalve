@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,26 +9,42 @@ const body = {
   model: "offline-model",
   messages: [{ role: "user", content: "private prompt" }],
 };
-async function setup(options: any = {}) {
-  const gateway = createGateway({
-    port: 0,
-    databasePath: ":memory:",
-    ...options,
-  });
+async function setup(
+  options: any = {},
+  runtime?: Parameters<typeof createGateway>[2],
+) {
+  const gateway = createGateway(
+    {
+      port: 0,
+      databasePath: ":memory:",
+      ...options,
+    },
+    undefined,
+    runtime,
+  );
   const url = await gateway.listen();
   const post = () =>
     fetch(url + "/v1/chat/completions", {
       method: "POST",
+      ...(runtime?.localKey
+        ? { headers: { authorization: "Bearer " + runtime.localKey } }
+        : {}),
       body: JSON.stringify(body),
     });
   const get = async (path: string) => {
-    const response = await fetch(url + path);
+    const response = await fetch(
+      url + path,
+      runtime?.localKey
+        ? { headers: { authorization: "Bearer " + runtime.localKey } }
+        : {},
+    );
     assert.equal(response.status, 200);
     return response.json();
   };
   return { gateway, url, post, get };
 }
 function databasePath(): string {
+  mkdirSync(new URL("../reports/", import.meta.url), { recursive: true });
   return (
     mkdtempSync(
       fileURLToPath(new URL("../reports/db-test-", import.meta.url)),
@@ -37,20 +53,73 @@ function databasePath(): string {
 }
 
 test("read-only status reports real queue state without consuming attempts", async (t) => {
-  const { gateway, post, get } = await setup({ mockDelayMs: 100 });
-  t.after(() => gateway.close());
+  let release!: () => void,
+    started!: () => void,
+    calls = 0;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const sent = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const { gateway, post, get } = await setup(
+    {
+      upstream: "openai-api-key",
+      model: "offline-model",
+      minStartIntervalMs: 0,
+    },
+    {
+      localKey: "test-local-key-private",
+      apiKey: "test-api-key-private",
+      fetch: async () => {
+        calls++;
+        if (calls === 1) {
+          started();
+          await gate;
+        }
+        return Response.json({
+          id: "chatcmpl-test",
+          object: "chat.completion",
+          model: "offline-model",
+          created: 1,
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "JSON" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 58,
+            completion_tokens: 13,
+            total_tokens: 71,
+            prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+            completion_tokens_details: { reasoning_tokens: 0 },
+          },
+        });
+      },
+    },
+  );
+  t.after(() => {
+    release();
+    return gateway.close();
+  });
   const first = post();
-  await delay(20);
+  await sent;
+  const queued = new Promise<void>((resolve) =>
+    gateway.server.once("ledgerChanged", () => resolve()),
+  );
   const second = post();
-  await delay(20);
+  await queued;
   const snapshot = await get("/_gateway/status");
-  assert.equal(snapshot.mode, "offline-only");
+  assert.equal(snapshot.mode, "openai-api-key");
   assert.equal(snapshot.queue.concurrency, 1);
   assert.equal(snapshot.queue.running, 1);
   assert.equal(snapshot.queue.waiting, 1);
   assert.equal(snapshot.usage.totalTokens, 0);
   for (let i = 0; i < 3; i++) await get("/_gateway/status");
-  assert.equal(gateway.mock.calls, 1);
+  assert.equal(calls, 1);
+  release();
   await Promise.all([first, second]);
   const done = await get("/_gateway/status");
   assert.equal(done.usage.inputTokens, 116);

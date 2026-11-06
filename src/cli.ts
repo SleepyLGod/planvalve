@@ -1,16 +1,25 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { loadConfig } from "./config.ts";
+import { AuthStore, AuthSession } from "./auth.ts";
 import { createGateway } from "./gateway.ts";
 const args = process.argv.slice(2);
 if (args.length && !(args.length === 2 && args[0] === "--config")) {
   console.error("Usage: npm start -- [--config path/to/config.json]");
   process.exitCode = 1;
 } else {
+  let subscription: AuthSession | undefined;
   let closeOnError: (() => Promise<void>) | undefined;
   try {
     const config = loadConfig(args[1]);
-    const gateway = createGateway(config);
+    if (config.upstream === "chatgpt-subscription") {
+      subscription = new AuthSession(new AuthStore(config.authPath));
+      if (subscription.status().state === "login-required")
+        throw new Error(
+          "Subscription login required; run npm run auth -- login with the same config",
+        );
+    }
+    const gateway = createGateway(config, undefined, { subscription });
     closeOnError = gateway.close;
     const save = () => {
       const file = resolve(config.reportPath);
@@ -54,9 +63,10 @@ if (args.length && !(args.length === 2 && args[0] === "--config")) {
     save();
     console.log(
       JSON.stringify({
-        mode: "offline-only",
+        mode: gateway.status().mode,
+        upstream: config.upstream,
         url,
-        model: "offline-model",
+        model: config.model ?? "offline-model",
         report: resolve(config.reportPath),
         database:
           config.databasePath === ":memory:"
@@ -65,6 +75,7 @@ if (args.length && !(args.length === 2 && args[0] === "--config")) {
       }),
     );
   } catch (error) {
+    subscription?.close();
     await closeOnError?.().catch((cleanupError) =>
       console.error("Cleanup failed:", String(cleanupError)),
     );

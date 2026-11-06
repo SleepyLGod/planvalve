@@ -1,18 +1,23 @@
-# Troubleshooting and known limits
+# Troubleshooting
 
-- **Missing `node:sqlite` or TypeScript execution support:** use Node.js 26+ from the project requirements. All dependencies are project-local; no global TypeScript installation is needed.
-- **Address already in use:** choose a free `port` in a copied configuration file, then point the monitor at that exact loopback origin with `--url`.
-- **Dashboard exits after printing:** non-interactive stdin/stdout intentionally use one-shot mode. Run in a real terminal for TUI interaction.
-- **No `python3`:** set `GATEWAY_TEST_PYTHON` to an available Python 3.9+ executable for the POSIX terminal tests. The gateway itself does not require Python. PTY tests target macOS/Linux, not Windows.
-- **LOTUS is unavailable:** `test:lotus` is optional. Set `GATEWAY_LOTUS_PYTHON` to an existing environment containing LOTUS, LiteLLM and pandas. No repository-specific virtualenv is required or installed automatically.
-- **Unknown mock-model price:** LOTUS may warn that it cannot price `offline-model`; token assertions remain meaningful, monetary estimates do not.
-- **Same answer for different prompts:** the default server uses a fixture, so this is expected. It is not a real model or a token estimator.
-- **Probe sign-in expires or lacks plan permission:** no inference is sent. A later explicitly requested probe can start a fresh authorization. Do not repeatedly retry a rejected request or switch billing silently.
-- **Probe selected-account mismatch:** the single local registration is bound to its verified account. Multi-account management is not implemented.
-- **Sender paused:** inspect the recorded error. Offline state resets with a process restart; a real probe ends rather than auto-retrying.
-- **Token budget overshoots:** `stopAfterTokens` is checked from observed usage before the next dispatch. It is not a hard token ceiling for a request already running.
-- **Database cannot be written:** new dispatch pauses and the response cannot pretend persistence succeeded. Check the configured local path, permissions and other writers.
-- **Old running record after restart:** historical state is only the last recorded state. Tasks are not resumed or resent.
-- **Slow real response:** the two-call observation included a JSON gateway response of about 90 seconds. Its latency cause is unresolved; no performance claim is made.
+- **Same answer for every prompt:** default upstream is an offline fixture. It is neither a model nor a token estimator.
+- **Node/SQLite/TypeScript unavailable:** use Node.js 26+ and project-local npm dependencies.
+- **Model not available:** choose a model eligible for the selected upstream/account. The local /v1/models endpoint only reports configuration. Startup does not verify access.
+- **401 invalid_local_key:** set the same GATEWAY_LOCAL_API_KEY in server/client/monitor. The upstream key is different.
+- **403 invalid_origin:** use the exact numeric loopback URL. Public hosts and cross-origin browser calls are not supported.
+- **Login required:** stop the subscription server, then run npm run auth -- login with the same config. Login does not send inference. Status reads only local state and cannot prove remote access remains valid.
+- **Authorization in use:** stop the existing subscription process before login/logout or a second server. OS SQLite locks release after process exit; do not delete credential/lock files to override a running service.
+- **Private directory required:** use a dedicated private subdirectory for authPath. Existing shared directories are not chmodded automatically.
+- **Wrong account:** the single registration is bound to its verified identity. Account pools/switching are not implemented; do not rotate identities to evade limits.
+- **Refresh temporarily fails:** credentials are retained; no model call is automatically retried. Confirmed invalid refresh tokens require fresh login.
+- **Logout revocation unconfirmed:** local tokens were cleared, but remote revocation was not confirmed. Disconnect the app in ChatGPT Settings.
+- **Sender paused:** inspect error code, upstream metadata and Retry-After. Rate, balance and subscription limits are distinct. Restart only after checking the cause; it resets local budgets, not provider limits.
+- **Budget overshoots:** the token stop condition uses already observed usage. It does not cap an in-flight request. Configure provider-side billing controls separately.
+- **Database unavailable:** dispatch pauses; successful persistence cannot be faked and requests are not resent to repair a ledger.
+- **Old running row:** this is historical last-known state, not a recovered task.
+- **Slow response:** inspect headers, first-text, terminal and finish timestamps. Buffered API-key responses have no true first-token measurement. The historical 90-second request lacks this timeline; its root cause remains unconfirmed. An offline regression verifies completion no longer waits for an open transport tail.
+- **Monitor prints once:** non-TTY output uses one-shot mode. Use a terminal for keyboard navigation; Q does not stop the gateway. The monitor reads no upstream credentials.
+- **No Python:** only POSIX terminal tests require it. Set GATEWAY_TEST_PYTHON to an existing Python 3.9+ interpreter. LOTUS checks are optional and use GATEWAY_LOTUS_PYTHON without installing dependencies.
+- **Unsupported request parameters:** ordinary API-key parameters are preserved within the supported subset. Subscription strict rejects unsupported parameters; optional lotus records omissions, which do not enforce those settings.
 
-Current compatibility is text messages, non-streaming client responses, text/JSON output and the documented parameter profiles. No embeddings, audio/images, tool execution, full provider framework, crash recovery, remote access or persistent real serving is claimed.
+Unsupported: streaming clients, tools/images/audio, full provider framework, exposed-network service, task recovery and shared-account operation. Persistent subscription serving has passed bounded live text/JSON, restart reuse, renewal and one LOTUS sem_map check; API-key serving has offline acceptance. Long-running reliability remains unverified. See the [verification record](offline-verification.md).
