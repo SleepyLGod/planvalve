@@ -4,6 +4,8 @@
 
 LOTUS 是客户端示例，不是网关的安装依赖。复用已经安装 LOTUS、LiteLLM 和 pandas 的 Python 环境。下面命令都从网关项目根目录执行，无须修改研究仓库或其依赖。
 
+通用调用方式见 [LiteLLM 接入](litellm-integration.md)；研究仓库的特殊配置与障碍见 [agent-memory 案例](agent-memory-example.md)，不作为网关核心需求。
+
 ## 启动网关
 
 新安装时，选一个自己有权限使用的模型，初始化并登录一次：

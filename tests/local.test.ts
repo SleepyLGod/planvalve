@@ -236,7 +236,7 @@ test("local start forwards signals and the JS local example uses its saved model
   const preload = resolve(root, "fake-upstream.mjs");
   writeFileSync(
     preload,
-    `const original=globalThis.fetch;globalThis.fetch=async(input,init)=>{if(String(input)==='https://api.openai.com/v1/chat/completions')return Response.json({id:'chatcmpl-fake',object:'chat.completion',created:1,model:'test-model',choices:[{index:0,message:{role:'assistant',content:'{"answer":2}'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7}});return original(input,init)};`,
+    `const original=globalThis.fetch;globalThis.fetch=async(input,init)=>{if(String(input)==='https://api.openai.com/v1/chat/completions')return Response.json({id:'chatcmpl-fake',object:'chat.completion',created:1,model:'test-model',choices:[{index:0,message:{role:'assistant',content:'{"answer":2}'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,prompt_tokens_details:{cached_tokens:1},completion_tokens_details:{reasoning_tokens:1}}});return original(input,init)};`,
   );
   const env = {
     ...guardedEnv(),
@@ -327,6 +327,41 @@ test("local start forwards signals and the JS local example uses its saved model
     assert(!python.stdout.includes(original.localKey));
     expectedCalls++;
   }
+  if (process.env.GATEWAY_LITELLM_PYTHON) {
+    const litellm = await collected(
+      process.env.GATEWAY_LITELLM_PYTHON,
+      [
+        "-I",
+        "-B",
+        resolve(repository, "tests/local-python-check.py"),
+        resolve(root, "examples/litellm_client.py"),
+      ],
+      repository,
+      {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HTTP_PROXY: "http://127.0.0.1:1",
+        HTTPS_PROXY: "http://127.0.0.1:1",
+        ALL_PROXY: "http://127.0.0.1:1",
+        NO_PROXY: "",
+        no_proxy: "",
+      },
+    );
+    assert.equal(litellm.code, 0, litellm.stderr);
+    assert.equal(JSON.parse(litellm.stdout).text, '{"answer":2}');
+    assert.equal(JSON.parse(litellm.stdout).usage.total_tokens, 7);
+    assert.equal(
+      JSON.parse(litellm.stdout).usage.prompt_tokens_details.cached_tokens,
+      1,
+    );
+    assert.equal(
+      JSON.parse(litellm.stdout).usage.completion_tokens_details
+        .reasoning_tokens,
+      1,
+    );
+    assert(!litellm.stdout.includes(original.localKey));
+    assert(!litellm.stderr.includes(original.localKey));
+    expectedCalls++;
+  }
   const terminal = await collected(
     process.env.GATEWAY_TEST_PYTHON ?? "python3",
     [
@@ -370,4 +405,40 @@ test("local start forwards signals and the JS local example uses its saved model
   );
   assert.notEqual(conflicting.code, 0);
   assert.match(conflicting.stderr, /together|combine|exclusive/i);
+  if (process.env.GATEWAY_LITELLM_PYTHON) {
+    let calls = 0;
+    const failing = createServer((_req, res) => {
+      calls++;
+      res.writeHead(429, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: {
+            code: "rate_limit_exceeded",
+            message: "Synthetic local limit",
+          },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      failing.listen(config.port, "127.0.0.1", resolve),
+    );
+    t.after(
+      () => new Promise<void>((resolve) => failing.close(() => resolve())),
+    );
+    const failed = await collected(
+      process.env.GATEWAY_LITELLM_PYTHON,
+      [
+        "-I",
+        "-B",
+        resolve(repository, "tests/local-python-check.py"),
+        resolve(root, "examples/litellm_client.py"),
+      ],
+      repository,
+      { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    );
+    assert.notEqual(failed.code, 0);
+    assert.equal(calls, 1, "LiteLLM example must not resend a failed request");
+    assert(!failed.stdout.includes(original.localKey));
+    assert(!failed.stderr.includes(original.localKey));
+  }
 });

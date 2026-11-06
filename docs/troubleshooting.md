@@ -11,7 +11,9 @@
 - **Wrong account:** the single registration is bound to its verified identity. Account pools/switching are not implemented; do not rotate identities to evade limits.
 - **Refresh temporarily fails:** credentials are retained; no model call is automatically retried. Confirmed invalid refresh tokens require fresh login.
 - **Logout revocation unconfirmed:** local tokens were cleared, but remote revocation was not confirmed. Disconnect the app in ChatGPT Settings.
-- **Sender paused:** inspect error code, upstream metadata and Retry-After. Rate, balance and subscription limits are distinct. Restart only after checking the cause; it resets local budgets, not provider limits.
+- **Sender cooling down:** a recognized temporary error supplied a reliable waiting hint. Unsent work may continue later; the failed call is never resent. `slow_down` increases the effective interval for this run. An individual deadline can still expire first.
+- **429 dispatch_expired:** the deadline expired before sending. No inference attempt was consumed, the sender remains usable and any existing cooldown remains active. Increase the waiting/execution deadline deliberately if a batch needs to wait longer.
+- **Sender paused:** quota/balance/permissions, missing reliable hints, unknown errors and storage failures require inspection. Restart only after checking the cause; it resets local budgets and pacing, not provider limits.
 - **Budget overshoots:** the token stop condition uses already observed usage. It does not cap an in-flight request. Configure provider-side billing controls separately.
 - **Database unavailable:** dispatch pauses; successful persistence cannot be faked and requests are not resent to repair a ledger.
 - **Old running row:** this is historical last-known state, not a recovered task.
@@ -20,4 +22,4 @@
 - **No Python:** only POSIX terminal tests require it. Set GATEWAY_TEST_PYTHON to an existing Python 3.9+ interpreter. LOTUS checks are optional and use GATEWAY_LOTUS_PYTHON without installing dependencies.
 - **Unsupported request parameters:** ordinary API-key parameters are preserved within the supported subset. Subscription strict rejects unsupported parameters; optional lotus records omissions, which do not enforce those settings.
 
-Unsupported: streaming clients, tools/images/audio, full provider framework, exposed-network service, task recovery and shared-account operation. Persistent subscription serving has passed bounded live text/JSON, restart reuse, renewal and one LOTUS sem_map check; API-key serving has offline acceptance. Long-running reliability remains unverified. See the [verification record](offline-verification.md).
+Unsupported: streaming clients, tools/images/audio, full provider framework, exposed-network service, task recovery and shared-account operation. Subscription serving has passed bounded live text/JSON, restart reuse, renewal, LOTUS sem_map and independent LiteLLM checks. The current scheduler also passed a separately authorized two-request check with actual concurrency 2 and a 3-second send interval. API-key serving and real-limit recovery have offline acceptance only; long-running reliability remains unverified. See the [verification record](offline-verification.md), including the earlier test-only observer failure.

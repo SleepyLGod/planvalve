@@ -31,7 +31,7 @@ async function main(): Promise<void> {
         }),
       );
     } finally {
-      session.close();
+      await session.close();
     }
     return;
   }

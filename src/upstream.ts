@@ -1,3 +1,6 @@
+import { rateHeaders } from "./rate-limit.ts";
+import { trackResponse } from "./transport.ts";
+import { DispatchControl } from "./dispatch.ts";
 import OpenAI from "openai";
 import { isolatedSDK } from "./sdk.ts";
 import { object, normalizeUsage } from "./compatibility.ts";
@@ -6,7 +9,33 @@ import { Redactor } from "./privacy.ts";
 export interface CredentialSource {
   accessToken(signal?: AbortSignal): Promise<string>;
   status(): { state: string };
-  close(): void;
+  close(): void | Promise<void>;
+}
+/** Sanitize before putting observations in the shared in-flight ledger. */
+export function captureResponse(
+  record: LedgerRecord,
+  response: Response,
+  redact: Redactor,
+): void {
+  const headers = redact.value(rateHeaders(response.headers));
+  const requestId = response.headers.get("x-request-id");
+  record.headersAt = new Date().toISOString();
+  record.rateLimit = {
+    observedAt: record.headersAt,
+    headers,
+    decision: { action: "none" },
+  };
+  record.upstreamHttp = redact.value({
+    status: response.status,
+    ...(requestId
+      ? {
+          requestId: /^[\x20-\x7e]{1,256}$/.test(requestId)
+            ? requestId
+            : "[invalid]",
+        }
+      : {}),
+    ...(headers["retry-after"] ? { retryAfter: headers["retry-after"] } : {}),
+  });
 }
 /** Do not let a slow credential provider keep the FIFO occupied past its deadline. */
 async function waitForToken(
@@ -32,21 +61,23 @@ async function waitForToken(
 export function captureUsage(
   record: LedgerRecord,
   raw: unknown,
+  redact: Redactor,
   chat = false,
 ): void {
   if (!object(raw)) return;
-  record.rawUsage = structuredClone(raw);
+  const observed = redact.value(raw);
+  record.rawUsage = observed;
   try {
     const normalized = normalizeUsage(
       chat
         ? {
-            input_tokens: raw.prompt_tokens,
-            output_tokens: raw.completion_tokens,
-            total_tokens: raw.total_tokens,
-            input_tokens_details: raw.prompt_tokens_details,
-            output_tokens_details: raw.completion_tokens_details,
+            input_tokens: observed.prompt_tokens,
+            output_tokens: observed.completion_tokens,
+            total_tokens: observed.total_tokens,
+            input_tokens_details: observed.prompt_tokens_details,
+            output_tokens_details: observed.completion_tokens_details,
           }
-        : raw,
+        : observed,
     );
     record.usage = normalized.usage;
     record.usageCompleteness = normalized.completeness;
@@ -59,6 +90,8 @@ export async function responsesText(
   payload: ObjectValue,
   signal: AbortSignal,
   record: LedgerRecord,
+  redact: Redactor,
+  onFailure: (error: GatewayError) => void = () => {},
 ): Promise<string> {
   let refused = false;
   let text = "",
@@ -94,18 +127,41 @@ export async function responsesText(
       terminal = event as any;
       record.terminalAt = new Date().toISOString();
       if (object(terminal.response?.error))
-        record.upstreamError = {
+        record.upstreamError = redact.value({
           code:
             typeof terminal.response.error.code === "string" &&
             /^[a-zA-Z0-9_]{1,100}$/.test(terminal.response.error.code)
               ? terminal.response.error.code
               : "upstream_failed",
-        };
+        });
       if (object(terminal.response?.incomplete_details))
-        record.upstreamIncompleteDetails = structuredClone(
+        record.upstreamIncompleteDetails = redact.value(
           terminal.response.incomplete_details,
         );
-      captureUsage(record, terminal.response?.usage);
+      captureUsage(record, terminal.response?.usage, redact);
+      if (
+        terminal.type !== "response.completed" ||
+        terminal.response?.status !== "completed"
+      ) {
+        const rawCode = terminal.response?.error?.code;
+        const code =
+          typeof rawCode === "string" && /^[a-zA-Z0-9_]{1,100}$/.test(rawCode)
+            ? rawCode
+            : terminal.type === "response.incomplete"
+              ? "upstream_incomplete"
+              : "upstream_failed";
+        const failure = new GatewayError(
+          code === "subscription_sharing_usage_limit_exceeded"
+            ? 429
+            : code === "subscription_sharing_usage_unavailable"
+              ? 503
+              : 502,
+          redact.text(code),
+          "Upstream did not complete normally",
+        );
+        onFailure(failure);
+        throw failure;
+      }
       break; // SDK iterator cleanup cancels the body; completion does not require EOF.
     } else if (event.type === "error")
       throw new GatewayError(
@@ -128,27 +184,6 @@ export async function responsesText(
         ? "Absolute upstream deadline exceeded"
         : "Stream ended without a terminal event",
     );
-  if (
-    terminal.type !== "response.completed" ||
-    terminal.response?.status !== "completed"
-  ) {
-    const rawCode = terminal.response?.error?.code;
-    const code =
-      typeof rawCode === "string" && /^[a-zA-Z0-9_]{1,100}$/.test(rawCode)
-        ? rawCode
-        : terminal.type === "response.incomplete"
-          ? "upstream_incomplete"
-          : "upstream_failed";
-    throw new GatewayError(
-      code === "subscription_sharing_usage_limit_exceeded"
-        ? 429
-        : code === "subscription_sharing_usage_unavailable"
-          ? 503
-          : 502,
-      code,
-      "Upstream did not complete normally",
-    );
-  }
   if (
     refused ||
     (Array.isArray(terminal.response.output) &&
@@ -178,70 +213,13 @@ export function officialUpstream(
   credential: CredentialSource,
   send: typeof fetch,
   redact: Redactor,
+  dispatch = new DispatchControl({
+    minStartIntervalMs: 0,
+    maxRequestsPerMinute: null,
+  }),
+  observe: (record: LedgerRecord, failure?: GatewayError) => void = () => {},
 ) {
-  let active: LedgerRecord | undefined;
-  let dispatched = () => {};
   const path = kind === "openai-api-key" ? "/chat/completions" : "/responses";
-  const client = isolatedSDK(async (input, init) => {
-    if (
-      String(input) !== "http://offline.invalid/v1" + path ||
-      init?.method !== "POST"
-    )
-      throw new Error("Unexpected upstream destination");
-    if (credential.status().state === "login-required")
-      throw new GatewayError(
-        401,
-        "subscription_auth_required",
-        "Subscription login required",
-      );
-    let token: string;
-    try {
-      token = await waitForToken(credential, init.signal);
-    } catch {
-      throw new GatewayError(
-        503,
-        credential.status().state === "login-required"
-          ? "subscription_auth_required"
-          : "subscription_refresh_failed",
-        "Subscription authorization unavailable; check auth status",
-      );
-    }
-    redact.add(token);
-    if (init.signal?.aborted) throw init.signal.reason;
-    const headers = new Headers(init.headers);
-    headers.set("authorization", "Bearer " + token);
-    if (active) {
-      active.dispatchedAt = new Date().toISOString();
-      active.inferenceDispatched = true;
-    }
-    try {
-      dispatched();
-    } catch (error) {
-      if (active) {
-        active.inferenceDispatched = false;
-        active.dispatchedAt = undefined;
-      }
-      throw error;
-    }
-    const response = await send("https://api.openai.com/v1" + path, {
-      ...init,
-      headers,
-      redirect: "error",
-    });
-    if (active) {
-      active.headersAt = new Date().toISOString();
-      active.upstreamHttp = {
-        status: response.status,
-        ...(response.headers.get("x-request-id")
-          ? { requestId: response.headers.get("x-request-id")! }
-          : {}),
-        ...(response.headers.get("retry-after")
-          ? { retryAfter: response.headers.get("retry-after")! }
-          : {}),
-      };
-    }
-    return response;
-  });
   return {
     credential,
     async complete(
@@ -250,17 +228,84 @@ export function officialUpstream(
       record: LedgerRecord,
       onDispatch: () => void,
     ): Promise<string> {
-      active = record;
-      dispatched = onDispatch;
+      const active = record;
+      const dispatched = onDispatch;
+      let settle = async () => {};
+      const client = isolatedSDK(async (input, init) => {
+        if (
+          String(input) !== "http://offline.invalid/v1" + path ||
+          init?.method !== "POST"
+        )
+          throw new Error("Unexpected upstream destination");
+        if (credential.status().state === "login-required")
+          throw new GatewayError(
+            401,
+            "subscription_auth_required",
+            "Subscription login required",
+          );
+        const response = await dispatch.run(
+          signal,
+          async (waiting) => {
+            try {
+              return await waitForToken(credential, waiting);
+            } catch {
+              throw new GatewayError(
+                503,
+                credential.status().state === "login-required"
+                  ? "subscription_auth_required"
+                  : "subscription_refresh_failed",
+                "Subscription authorization unavailable; check auth status",
+              );
+            }
+          },
+          (token) => {
+            redact.add(token);
+            if (init.signal?.aborted) throw init.signal.reason;
+            const headers = new Headers(init.headers);
+            headers.set("authorization", "Bearer " + token);
+            if (active) {
+              active.dispatchedAt = new Date().toISOString();
+              active.inferenceDispatched = true;
+            }
+            try {
+              dispatched();
+            } catch (error) {
+              if (active) {
+                active.inferenceDispatched = false;
+                active.dispatchedAt = undefined;
+              }
+              throw error;
+            }
+            const response = send("https://api.openai.com/v1" + path, {
+              ...init,
+              headers,
+              redirect: "error",
+            });
+            return response;
+          },
+        );
+        const tracked = trackResponse(response);
+        settle = tracked.settle;
+        captureResponse(record, response, redact);
+        observe(record);
+        return tracked.response;
+      });
       try {
         if (kind === "chatgpt-subscription")
-          return await responsesText(client, payload, signal, record);
+          return await responsesText(
+            client,
+            payload,
+            signal,
+            record,
+            redact,
+            (failure) => observe(record, failure),
+          );
         const result = await client.chat.completions.create(
           payload as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
           { signal },
         );
         record.terminalAt = new Date().toISOString();
-        captureUsage(record, result.usage, true);
+        captureUsage(record, result.usage, redact, true);
         if (signal.aborted)
           throw new GatewayError(
             502,
@@ -317,19 +362,18 @@ export function officialUpstream(
             /^[a-zA-Z0-9_]{1,100}$/.test(error.code)
               ? error.code
               : "upstream_http_error";
-          record.upstreamError = { code }; // Provider error messages can echo prompts or credentials.
+          record.upstreamError = redact.value({ code }); // Never expose provider diagnostics or reflected secrets.
           throw new GatewayError(
             error.status && error.status >= 400 && error.status <= 599
               ? error.status
               : 502,
-            code,
+            redact.text(code),
             "Upstream rejected the request",
           );
         }
         throw error;
       } finally {
-        active = undefined;
-        dispatched = () => {};
+        await settle();
       }
     },
   };

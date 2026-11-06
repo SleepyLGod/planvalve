@@ -44,7 +44,6 @@ test("completed Responses event cancels an open transport tail before its deadli
   );
   t.after(() => gateway.close());
   const url = await gateway.listen();
-  const started = Date.now();
   const response = await fetch(url + "/v1/chat/completions", {
     method: "POST",
     body: JSON.stringify({
@@ -53,8 +52,10 @@ test("completed Responses event cancels an open transport tail before its deadli
     }),
   });
   assert.equal(response.status, 200);
+  const record = gateway.records[0]!;
+  // Measure the server's terminal-to-finish path, excluding unrelated client/loopback scheduling.
   assert(
-    Date.now() - started < 600,
+    Date.parse(record.finishedAt!) - Date.parse(record.terminalAt!) < 600,
     "must return on completion rather than wait for the absolute deadline",
   );
   assert.equal(cancelled, true);

@@ -1,27 +1,27 @@
-import { setTimeout as delay } from "node:timers/promises";
-import { GatewayError } from "./types.ts";
-interface Job {
-  execute: () => Promise<unknown>;
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-  cleanup: () => void;
-}
-/** One FIFO sender; cancellations only remove work that has not started. */
+import PQueue from "p-queue";
+import { GatewayError, type Config } from "./types.ts";
+/** One task queue. Its slots stay occupied until execution and persistence settle. */
 export class Queue {
-  jobs: Job[] = [];
-  busy = false;
+  private queue: PQueue;
   paused = false;
   closed = false;
-  lastStart = 0;
-  capacity: number;
-  waitMs: number;
-  intervalMs: number;
-  private pacing?: AbortController;
-  private idleWaiters: (() => void)[] = [];
-  constructor(capacity: number, waitMs: number, intervalMs: number) {
-    this.capacity = capacity;
-    this.waitMs = waitMs;
-    this.intervalMs = intervalMs;
+  private config: Pick<
+    Config,
+    "concurrency" | "queueCapacity" | "maxQueueWaitMs"
+  >;
+  constructor(
+    config: Pick<Config, "concurrency" | "queueCapacity" | "maxQueueWaitMs">,
+  ) {
+    this.config = config;
+    this.queue = new PQueue({ concurrency: config.concurrency });
+  }
+  stats() {
+    return {
+      running: this.queue.pending,
+      waiting: this.queue.size,
+      paused: this.paused,
+      closed: this.closed,
+    };
   }
   submit<T>(execute: () => Promise<T>, signal: AbortSignal): Promise<T> {
     if (this.paused || this.closed)
@@ -32,7 +32,7 @@ export class Queue {
           "The local sender is paused or closed",
         ),
       );
-    if (this.jobs.length >= this.capacity)
+    if (this.queue.size >= this.config.queueCapacity)
       return Promise.reject(
         new GatewayError(429, "queue_full", "Local queue is full"),
       );
@@ -44,99 +44,59 @@ export class Queue {
           "Client disconnected before execution",
         ),
       );
-    return new Promise<T>((resolve, reject) => {
-      const remove = (error: GatewayError) => {
-        const index = this.jobs.indexOf(job);
-        if (index < 0) return;
-        this.jobs.splice(index, 1);
-        job.cleanup();
-        if (!this.jobs.length) this.pacing?.abort();
-        reject(error);
-      };
-      const onAbort = () =>
-        remove(
-          new GatewayError(
-            499,
-            "cancelled",
-            "Client disconnected while queued",
-          ),
-        );
-      const timer = setTimeout(
-        () =>
-          remove(
-            new GatewayError(
-              429,
-              "queue_expired",
-              "Queue wait deadline exceeded",
-            ),
-          ),
-        this.waitMs,
+    const waiting = new AbortController();
+    const onAbort = () =>
+      waiting.abort(
+        new GatewayError(499, "cancelled", "Client disconnected while queued"),
       );
-      const job: Job = {
-        execute,
-        resolve: (value) => resolve(value as T),
-        reject,
-        cleanup: () => {
-          clearTimeout(timer);
-          signal.removeEventListener("abort", onAbort);
+    const timer = setTimeout(
+      () =>
+        waiting.abort(
+          new GatewayError(
+            429,
+            "queue_expired",
+            "Queue wait deadline exceeded",
+          ),
+        ),
+      this.config.maxQueueWaitMs,
+    );
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    return this.queue
+      .add(
+        async () => {
+          cleanup(); // Never let the library release a running slot on a client's abort.
+          return execute();
         },
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-      this.jobs.push(job);
-      void this.pump();
-    });
+        { signal: waiting.signal },
+      )
+      .catch((error: unknown) => {
+        if (waiting.signal.aborted) throw waiting.signal.reason;
+        if (
+          error instanceof DOMException &&
+          error.name === "AbortError" &&
+          (this.paused || this.closed)
+        )
+          throw new GatewayError(
+            503,
+            "gateway_paused",
+            "The local sender is paused or closed",
+          );
+        throw error;
+      })
+      .finally(cleanup);
   }
   pause(): void {
     this.paused = true;
-    this.pacing?.abort();
-    for (const j of this.jobs.splice(0)) {
-      j.cleanup();
-      j.reject(
-        new GatewayError(
-          503,
-          "gateway_paused",
-          "Sender paused after an upstream failure",
-        ),
-      );
-    }
-  }
-  private async pump(): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
-    try {
-      while (this.jobs.length && !this.paused && !this.closed) {
-        const gap = this.intervalMs - (Date.now() - this.lastStart);
-        if (gap > 0) {
-          this.pacing = new AbortController();
-          try {
-            await delay(gap, undefined, { signal: this.pacing.signal });
-          } catch (error) {
-            if (!this.pacing.signal.aborted) throw error;
-          } finally {
-            this.pacing = undefined;
-          }
-        }
-        if (this.paused || this.closed) break;
-        const job = this.jobs.shift();
-        if (!job) continue;
-        job.cleanup();
-        this.lastStart = Date.now();
-        try {
-          job.resolve(await job.execute());
-        } catch (error) {
-          job.reject(error instanceof Error ? error : new Error(String(error)));
-        }
-      }
-    } finally {
-      this.busy = false;
-      if (!this.jobs.length)
-        for (const resolve of this.idleWaiters.splice(0)) resolve();
-    }
+    this.queue.pause();
+    this.queue.clear();
   }
   async close(): Promise<void> {
     this.closed = true;
     this.pause();
-    if (this.busy)
-      await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+    await this.queue.onIdle();
   }
 }

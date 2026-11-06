@@ -2,11 +2,11 @@
 
 [English](README.md)
 
-在自己电脑运行，使用自己的 ChatGPT 订阅或 OpenAI API Key。提供 OpenAI 兼容接口、串行队列、token 记录、SQLite 历史和中英文终端监控。
+在自己电脑运行，使用自己的 ChatGPT 订阅或 OpenAI API Key。提供 OpenAI 兼容接口、可配置并发的 FIFO 队列、token 记录、SQLite 历史和中英文终端监控。
 
-LOTUS／LiteLLM 是一个重要示例；普通 SDK、脚本及其他兼容客户端使用同一接口，无须安装 LOTUS。
+普通 OpenAI SDK、LiteLLM 和其他兼容客户端使用同一接口。LOTUS／agent-memory 是可选使用案例，不是网关依赖或核心设计前提。
 
-**当前是原型。**默认离线模拟。两种上游均有离线测试；另外获准进行的真实验证已覆盖订阅文本／JSON、usage、重启复用授权、令牌续期，以及一次原生 LOTUS `sem_map`。这些是小规模接入验证，不代表长期运行已验证。本项目依据 OpenAI 官方公开文档实现，并非 OpenAI 官方认证产品。
+**当前是原型。**默认离线模拟。两种上游均有离线测试；另行获准的真实验证已覆盖订阅文本／JSON、usage、重启复用授权、令牌续期、原生 LOTUS `sem_map` 和独立 LiteLLM 示例。最新两请求验收实际观察到并发 2、发送间隔 3 秒；默认并发仍为 1。这些是小规模接入验证，真实限流后的恢复和长期运行仍未验证。详见[验收记录](docs/offline-verification.md)，其中也保留了此前测试脚本导致的失败。本项目依据 OpenAI 官方公开文档实现，并非 OpenAI 官方认证产品。
 
 ## 先离线运行
 
@@ -59,9 +59,13 @@ API Key 用户可初始化为 `npm run local -- init --model YOUR_MODEL --upstre
 ```bash
 node examples/client.mjs --local
 python3 -B examples/client.py --local
+# 使用已安装 LiteLLM 的现有 Python 环境：
+/path/to/existing/venv/bin/python -B examples/litellm_client.py --local
 ```
 
-**这两条客户端命令会实际发送请求**；初始化、启动和监控不会发送模型请求。`--local` 与 `--direct` 不能同时使用。其他客户端需要配置相同的地址、模型和本地 Key；示例演示了如何从私有文件读取，勿打印或上传 Key。
+**这些客户端命令会实际发送请求**；初始化、启动和监控不会发送模型请求。`--local` 与 `--direct` 不能同时使用。其他客户端需要配置相同的地址、模型和本地 Key；示例演示了如何从私有文件读取，勿打印或上传 Key。
+
+LiteLLM 示例必须显式加 `--local`，复用已有的受保护配置读取函数，打印一份包含文本和 usage 的 JSON。不导入 LOTUS／agent-memory、不读取订阅令牌、不登录、不安装依赖或查询模型目录。LiteLLM 与底层 SDK 均关闭重试，显式传输禁用环境代理和重定向；失败非零退出，不重发。普通 SDK 示例仍支持 `--direct`，这个 LiteLLM 示例只接受 `--local`。
 
 ## 选择上游
 
@@ -106,7 +110,9 @@ node examples/client.mjs
 python3 -B examples/client.py
 ```
 
-LOTUS 可能默认发送订阅接口不支持的参数。这时显式选择 `profile: "lotus"`；网关记录省略情况，省略不等于设置已生效。通用默认 `strict` 拒绝不支持的参数。按 [LOTUS 本机使用指南](docs/lotus.zh-CN.md)配置共享本地 Key、单并发及零重试。真实单行验证返回 `{"answer":2}`，输入 59／输出 12／总计 71 token；这是一次观测，不是固定用量或预测。
+LiteLLM 使用 `openai/<配置的模型>`、同一个本地 `/v1` 地址和本地访问 Key，设置 `num_retries=0` 并排除 loopback 的系统代理。详见 [LiteLLM 接入指南](docs/litellm-integration.md)。
+
+通用兼容策略默认 `strict`。[LOTUS](docs/lotus.zh-CN.md) 和 [agent-memory](docs/agent-memory-example.md) 是可选案例；只有客户端需要省略不支持的默认参数时，才显式选择 `profile: "lotus"`。省略情况会记录，不代表约束生效。
 
 API Key 用户也可以直接调用官方接口：运行示例时加 `--direct`，并设置 `MODEL` 和 `OPENAI_API_KEY`。这会绕过本地网关，因此本项目不提供该调用的限流、历史或实时 TUI；平台账单使用官方 Usage 页面查看。
 
@@ -115,9 +121,9 @@ API Key 用户也可以直接调用官方接口：运行示例时加 `--direct`�
 - 支持文本消息、一条 completion、非流式客户端响应，以及普通文本／JSON object／JSON schema。未实现工具、图片、embedding 或通用多 provider 框架。
 - 订阅模式转换为官方 Responses，`store:false`、`stream:true`，system 转为 developer。API Key 模式直接调用官方 Chat Completions，保留消息角色，支持 `temperature`、`top_p`、`max_tokens`、`max_completion_tokens`。
 - 不增加 agent 提示词、项目文件或历史；不自动修 JSON，不隐式缓存去重，不切换计费，不自动重试。调用端自己的重试也须明确配置；示例设为 0。
-- 并发固定 1。真实模式默认两次启动至少间隔 3 秒，这是本地默认值，不是官方保证的安全阈值。累计预算按本次运行计算，最后一次请求可能超过 token 阈值。
+- `concurrency` 可配置，默认 1；真实模式默认两次实际发送至少间隔 3 秒。可选 `maxRequestsPerMinute` 默认 `null`，通过平滑发送限制速率。例如并发 4、RPM 20 可以让请求重叠执行，同时至少每 3 秒发出一条。这些是本地策略，不是官方安全阈值。请求预算不会并发超发；token 阈值按已观测 usage 停止后续派发，在途请求仍可能使最终用量超出阈值。
 - **并发为 1 仍可能触发 RPM／TPM 限制。其他应用可能共享官方限额。我们只控制经过本工具的流量，不能保证避免限流或账号封控。**[官方限流文档](https://developers.openai.com/api/docs/guides/rate-limits)
-- 上游错误会暂停后续派发，失败请求不补发。显示具体错误码、HTTP 信息及 `Retry-After`；后者不是额度恢复承诺。检查原因后再重启；重启仅重置本地运行状态，不恢复官方额度。
+- 明确临时限流／过载且有可靠等待提示时，未发送任务等待后继续，失败请求不补发。`slow_down` 还会让本次运行的生效间隔翻倍，不改变并发，也不自动加速恢复。额度、余额、权限、未知错误和存储失败保持暂停；未发送任务到期只结束该任务。监控显示错误码与等待依据，等待提示不是额度恢复承诺；重启不恢复官方额度。
 - 成功必须有完成状态和有效 usage。Responses 收到终止事件后停止读取，不等待连接自行关闭。细分缺失显示未知，缓存／推理不重复加进总量。账号余额与实际费用保持未知。
 
 ## 数据、监控与验证
@@ -130,6 +136,8 @@ API Key 用户也可以直接调用官方接口：运行示例时加 `--direct`�
 npm run typecheck
 npm run build
 npm test
+# 可选，直接验收 LiteLLM，不导入 LOTUS 或 agent-memory：
+GATEWAY_LITELLM_PYTHON=/path/to/existing/venv/bin/python npm run test:litellm
 # 可选，复用已有 LOTUS 环境，也验收普通官方 Python SDK：
 GATEWAY_LOTUS_PYTHON=/path/to/existing/venv/bin/python npm run test:lotus
 ```
@@ -138,6 +146,8 @@ GATEWAY_LOTUS_PYTHON=/path/to/existing/venv/bin/python npm run test:lotus
 
 - [配置](docs/configuration.md) · [协议](docs/protocol.md) · [终端监控](docs/status.md)
 - [授权管理](docs/authorization.md) · [独立两请求 probe](docs/live-probe.md)
+- [LiteLLM 接入](docs/litellm-integration.md) · [TODO](TODO.md)
+- [跨机器设计](docs/remote-use.md) · [可选研究案例](docs/agent-memory-example.md)
 - [验收范围](docs/offline-verification.md) · [排错](docs/troubleshooting.md)
 - [fixture 来源](fixtures/README.md) · [发布检查](docs/privacy-review.md)
 

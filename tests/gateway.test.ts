@@ -165,6 +165,7 @@ test("request and observed-token budgets reject later calls", async (t) => {
     assert.equal((await post(body())).status, 200);
     assert.equal((await post(body())).status, 429);
     assert.equal(gateway.mock.calls, 1);
+    assert.equal(gateway.status().queue.paused, true);
   }
 });
 test("upstream failures, incomplete responses and disconnects pause without retry", async (t) => {

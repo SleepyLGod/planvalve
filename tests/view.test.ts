@@ -26,6 +26,50 @@ const request: HistoryRecord = {
   rawUsage: { input_tokens: 58, output_tokens: 13, total_tokens: 71 },
   usage: { prompt_tokens: 58, completion_tokens: 13, total_tokens: 71 },
 };
+test("scheduling overview translates actual in-flight counts and cooldown separately from configured limits", async () => {
+  const gateway = createGateway({ port: 0, databasePath: ":memory:" });
+  try {
+    const status = gateway.status();
+    status.queue.concurrency = 4;
+    status.queue.running = 2;
+    status.queue.preparing = 1;
+    status.queue.inFlight = 1;
+    status.dispatch = {
+      state: "cooldown",
+      waitMs: 1200,
+      reason: "rate_limit_exceeded",
+      effectiveStartIntervalMs: 6000,
+      maxRequestsPerMinute: 20,
+    };
+    const data = { status, page: { items: [], nextCursor: null } };
+    const en = render(data, initialView(), {
+      width: 110,
+      color: false,
+      lang: "en",
+    });
+    assert.match(en, /In flight 1/);
+    assert.match(en, /Preparing 1/);
+    assert.match(en, /Cooldown/);
+    assert.match(en, /6000/);
+    assert.match(en, /1200/);
+    const zh = render(data, initialView(), {
+      width: 110,
+      color: false,
+      lang: "zh",
+    });
+    assert.match(zh, /上游在途 1/);
+    assert.match(zh, /准备中 1/);
+    assert.match(zh, /上游冷却/);
+    delete status.dispatch;
+    delete status.queue.inFlight;
+    delete status.queue.preparing;
+    assert.doesNotThrow(() =>
+      render(data, initialView(), { width: 35, height: 15, color: false }),
+    );
+  } finally {
+    await gateway.close();
+  }
+});
 test("terminal handles narrow windows, unknown details and metadata controls", async () => {
   const gateway = createGateway({ port: 0, databasePath: ":memory:" });
   try {
