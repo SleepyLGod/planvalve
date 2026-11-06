@@ -288,6 +288,7 @@ function tokenSet(result: any, previous?: Tokens): Tokens {
 export class AuthSession implements CredentialSource {
   private release: () => void;
   private closed = false;
+  private closing?: Promise<void>;
   private refreshing?: Promise<string>;
   private abort = new AbortController();
   private store: AuthStore;
@@ -304,29 +305,39 @@ export class AuthSession implements CredentialSource {
     }
   }
   status(): { state: string } {
-    return this.closed ? { state: "closed" } : this.store.status();
+    return this.closed || this.closing
+      ? { state: "closed" }
+      : this.store.status();
   }
   async accessToken(signal?: AbortSignal): Promise<string> {
     signal?.throwIfAborted();
-    if (this.closed) throw new Error("Authorization session is closed");
+    if (this.closed || this.closing)
+      throw new Error("Authorization session is closed");
     const record = this.store.read(),
       tokens = record.credentials;
     if (!tokens || !requiredScopes.every((s) => tokens.scopes.includes(s)))
       throw new Error("Subscription login required; run npm run auth -- login");
     if (tokens.expires_at - Date.now() > 60000) return tokens.access_token;
-    return (this.refreshing ??= this.refresh(record, signal).finally(() => {
+    const shared = (this.refreshing ??= this.refresh(record).finally(() => {
       this.refreshing = undefined;
     }));
+    if (!signal) return shared;
+    return new Promise<string>((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+      shared
+        .then(resolve, reject)
+        .finally(() => signal.removeEventListener("abort", abort));
+    });
   }
-  private async refresh(
-    record: AuthRecord,
-    signal?: AbortSignal,
-  ): Promise<string> {
+  private async refresh(record: AuthRecord): Promise<string> {
     const options = {
       ...this.options,
-      signal: signal
-        ? AbortSignal.any([this.abort.signal, signal])
-        : this.abort.signal,
+      signal: AbortSignal.any([
+        this.abort.signal,
+        AbortSignal.timeout(60000),
+        ...(this.options.signal ? [this.options.signal] : []),
+      ]),
     };
     try {
       const config = await discovery(options);
@@ -411,12 +422,18 @@ export class AuthSession implements CredentialSource {
     this.store.save(record);
     return { remoteRevoked };
   }
-  close(): void {
-    if (!this.closed) {
-      this.closed = true;
-      this.abort.abort();
-      this.release();
-    }
+  close(): Promise<void> {
+    return (this.closing ??= (async () => {
+      try {
+        await this.refreshing;
+      } catch {
+        throw new Error("Authorization refresh failed during shutdown");
+      } finally {
+        this.closed = true;
+        this.abort.abort();
+        this.release();
+      }
+    })());
   }
 }
 export async function beginLogin(

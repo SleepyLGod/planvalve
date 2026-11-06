@@ -1,8 +1,12 @@
+import { trackResponse } from "./transport.ts";
+import { rateDecision } from "./rate-limit.ts";
+import { DispatchControl } from "./dispatch.ts";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import {
   officialUpstream,
+  captureResponse,
   responsesText,
   type CredentialSource,
 } from "./upstream.ts";
@@ -72,12 +76,15 @@ export function createGateway(
           close() {},
         }
       : runtime.subscription;
+  const dispatch = new DispatchControl(config);
   const upstream = real
     ? officialUpstream(
         config.upstream as "openai-api-key" | "chatgpt-subscription",
         credential!,
         runtime.fetch ?? globalThis.fetch,
         redact,
+        dispatch,
+        (record, failure) => observeUpstream(record, failure),
       )
     : undefined;
   const mode = probe
@@ -95,12 +102,7 @@ export function createGateway(
     throw new Error("Fixture must contain parsed events");
   const mock = new MockTransport(tape, { chunkSize, contentType, mockDelayMs });
   // The default transport is a fixture. A capped probe supplies its own explicit fetch; host credentials are never read.
-  const client = real ? undefined : isolatedSDK(probe?.fetch ?? mock.fetch);
-  const queue = new Queue(
-    config.queueCapacity,
-    config.maxQueueWaitMs,
-    config.minStartIntervalMs,
-  );
+  const queue = new Queue(config);
   const records: LedgerRecord[] = [];
   let attempts = 0;
   const runId = randomUUID();
@@ -118,14 +120,65 @@ export function createGateway(
   }
   let storageError: string | undefined;
   let pauseReason: string | undefined;
+  let latestUpstreamLimits: StatusSnapshot["upstreamLimits"];
+  const pauseSender = (reason: string) => {
+    pauseReason =
+      reason === "storage_unavailable" ||
+      (pauseReason?.startsWith("rate_limit_") &&
+        !reason.startsWith("rate_limit_") &&
+        reason !== "gateway_paused")
+        ? reason
+        : (pauseReason ?? reason);
+    dispatch.pause(pauseReason);
+    queue.pause();
+  };
+  const applyRate = (
+    record: LedgerRecord,
+    decision: import("./types.ts").RateDecision,
+  ) => {
+    if (decision.action === "none") return;
+    if (decision.action === "pause") {
+      pauseSender(decision.reason);
+      if (record.rateLimit)
+        record.rateLimit.decision = { action: "pause", reason: pauseReason! };
+      return;
+    }
+    const previous = record.rateLimit?.decision;
+    const applied =
+      decision.action === "cooldown" && previous?.action === "cooldown"
+        ? decision.slowDown && !previous.slowDown
+          ? dispatch.apply({ ...decision, delayMs: 0 })
+          : decision
+        : dispatch.apply(decision);
+    if (record.rateLimit) record.rateLimit.decision = applied;
+    if (applied.action === "pause") pauseSender(applied.reason);
+  };
+  const observeUpstream = (record: LedgerRecord, failure?: GatewayError) => {
+    if (!record.rateLimit) return;
+    if (!failure && Object.keys(record.rateLimit.headers).length)
+      latestUpstreamLimits = {
+        observedAt: record.rateLimit.observedAt,
+        headers: record.rateLimit.headers,
+      };
+    const status = record.upstreamHttp!.status;
+    if (failure || (status >= 200 && status < 300))
+      applyRate(
+        record,
+        rateDecision(
+          status,
+          failure?.code,
+          record.rateLimit.headers,
+          Date.now(),
+        ),
+      );
+  };
   const persist = (record: LedgerRecord) => {
     try {
       Object.assign(record, redact.value(record));
       history.save(runId, record);
     } catch {
       storageError = "SQLite write failed";
-      pauseReason = "storage_unavailable";
-      queue.pause();
+      pauseSender("storage_unavailable");
       throw new GatewayError(
         503,
         "storage_unavailable",
@@ -148,14 +201,22 @@ export function createGateway(
         state: probe ? "memory-only-probe" : "not-required",
       },
       pauseReason,
+      dispatch: dispatch.snapshot(),
+      upstreamLimits: latestUpstreamLimits,
       accountBalance: "unknown",
       actualCost: "unknown",
       asOf: new Date().toISOString(),
       runId,
       startedAt,
       queue: {
-        concurrency: 1,
-        running: records.filter((r) => r.status === "running").length,
+        concurrency: config.concurrency,
+        running: queue.stats().running,
+        preparing: records.filter(
+          (r) => r.status === "running" && !r.inferenceDispatched,
+        ).length,
+        inFlight: records.filter(
+          (r) => r.status === "running" && r.inferenceDispatched,
+        ).length,
         waiting: records.filter((r) => r.status === "queued").length,
         capacity: config.queueCapacity,
         paused: queue.paused,
@@ -193,6 +254,20 @@ export function createGateway(
     totals: summarizeUsage(records),
     records,
   });
+  const assertBudget = () => {
+    if (
+      (config.maxRequests !== null && attempts >= config.maxRequests) ||
+      (config.stopAfterTokens !== null &&
+        report().totals.totalTokens >= config.stopAfterTokens)
+    ) {
+      pauseSender("budget_exhausted");
+      throw new GatewayError(
+        429,
+        "budget_exhausted",
+        "Request or observed-token budget exhausted",
+      );
+    }
+  };
   const server = createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
     res.setHeader("x-should-retry", "false");
@@ -393,16 +468,7 @@ export function createGateway(
       persist(record);
       const current = record;
       const result = await queue.submit(async () => {
-        if (
-          (config.maxRequests !== null && attempts >= config.maxRequests) ||
-          (config.stopAfterTokens !== null &&
-            report().totals.totalTokens >= config.stopAfterTokens)
-        )
-          throw new GatewayError(
-            429,
-            "budget_exhausted",
-            "Request or observed-token budget exhausted",
-          );
+        assertBudget();
         current.status = "running";
         current.startedAt = new Date().toISOString();
         try {
@@ -412,26 +478,94 @@ export function createGateway(
           current.startedAt = undefined;
           throw error;
         }
-        if (!upstream) {
+        const deadline = AbortSignal.timeout(config.upstreamTimeoutMs);
+        const admission = new AbortController();
+        const signal = AbortSignal.any([deadline, admission.signal]);
+        let sent = false;
+        const cancelAdmission = () => {
+          if (!sent)
+            admission.abort(
+              new GatewayError(
+                499,
+                "cancelled",
+                "Client disconnected before dispatch",
+              ),
+            );
+        };
+        abort.signal.addEventListener("abort", cancelAdmission, { once: true });
+        if (abort.signal.aborted) cancelAdmission();
+        const onDispatch = () => {
+          assertBudget();
+          persist(current);
+          if (queue.paused || queue.closed)
+            throw new GatewayError(
+              503,
+              "gateway_paused",
+              "The local sender is paused or closed",
+            );
+          signal.throwIfAborted();
+          sent = true;
+          abort.signal.removeEventListener("abort", cancelAdmission);
           attempts++;
-          current.dispatchedAt = new Date().toISOString();
-          current.inferenceDispatched = true;
-        }
-        const signal = AbortSignal.timeout(config.upstreamTimeoutMs);
+        };
+        let settle = async () => {};
+        const client = upstream
+          ? undefined
+          : isolatedSDK(async (input, init) => {
+              const response = await dispatch.run(
+                signal,
+                async () => undefined,
+                () => {
+                  signal.throwIfAborted();
+                  current.dispatchedAt = new Date().toISOString();
+                  current.inferenceDispatched = true;
+                  try {
+                    onDispatch();
+                  } catch (error) {
+                    current.inferenceDispatched = false;
+                    current.dispatchedAt = undefined;
+                    throw error;
+                  }
+                  return (probe?.fetch ?? mock.fetch)(input, init);
+                },
+              );
+              const tracked = trackResponse(response);
+              settle = tracked.settle;
+              captureResponse(current, response, redact);
+              observeUpstream(current);
+              return tracked.response;
+            });
+        const offlineText = async () => {
+          try {
+            return await responsesText(
+              client!,
+              translated.payload,
+              signal,
+              current,
+              redact,
+              (failure) => observeUpstream(current, failure),
+            );
+          } finally {
+            await settle();
+          }
+        };
         try {
           const text = upstream
             ? await upstream.complete(
                 translated.payload,
                 signal,
                 current,
-                () => {
-                  persist(current);
-                  attempts++;
-                  queue.lastStart = Date.now();
-                },
+                onDispatch,
               )
-            : await responsesText(client!, translated.payload, signal, current);
+            : await offlineText();
           translated.validateText(text);
+          const decision = rateDecision(
+            current.upstreamHttp?.status ?? 200,
+            undefined,
+            current.rateLimit?.headers ?? {},
+            Date.now(),
+          );
+          applyRate(current, decision);
           current.status = "completed";
           current.endReason = "completed";
           return {
@@ -449,13 +583,46 @@ export function createGateway(
             usage: current.usage,
           };
         } catch (error) {
+          if (admission.signal.aborted && !current.inferenceDispatched) {
+            current.endReason = "cancelled";
+            current.status = "cancelled";
+            throw new GatewayError(
+              499,
+              "cancelled",
+              "Client disconnected before dispatch",
+            );
+          }
+          if (signal.aborted && !current.inferenceDispatched) {
+            current.endReason = "dispatch_expired";
+            current.status = "expired";
+            throw new GatewayError(
+              429,
+              "dispatch_expired",
+              "Deadline exceeded before upstream dispatch",
+            );
+          }
           current.endReason = signal.aborted
             ? "timeout"
             : error instanceof GatewayError
               ? error.code
               : "stream_interrupted";
-          pauseReason = current.endReason;
-          queue.pause();
+          const failure =
+            error instanceof GatewayError
+              ? error
+              : new GatewayError(
+                  502,
+                  "stream_interrupted",
+                  "Upstream stream failed",
+                );
+          const decision = signal.aborted
+            ? { action: "pause" as const, reason: "timeout" }
+            : rateDecision(
+                current.upstreamHttp?.status === 200 ? 200 : failure.status,
+                failure.code,
+                current.rateLimit?.headers ?? {},
+                Date.now(),
+              );
+          applyRate(current, decision);
           current.status =
             current.inferenceDispatched === false
               ? "failed"
@@ -474,6 +641,7 @@ export function createGateway(
                   : "Upstream stream failed",
               );
         } finally {
+          abort.signal.removeEventListener("abort", cancelAdmission);
           current.finishedAt = new Date().toISOString();
           persist(current);
         }
@@ -550,6 +718,7 @@ export function createGateway(
       }),
     close: () =>
       (closing ??= (async () => {
+        dispatch.close();
         await queue.close();
         try {
           if (server.listening)
@@ -560,7 +729,7 @@ export function createGateway(
           if (!storageError) history.finish(runId);
         } finally {
           history.close();
-          credential?.close();
+          await credential?.close();
         }
       })()),
   };

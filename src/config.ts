@@ -7,6 +7,8 @@ export const defaults: Config = {
   model: null,
   authPath: "data/auth/session.json",
   port: 8787,
+  concurrency: 1,
+  maxRequestsPerMinute: null,
   fixturePath: fileURLToPath(
     new URL("../fixtures/observed-json.json", import.meta.url),
   ),
@@ -39,6 +41,7 @@ export function validateConfig(value: unknown): Config {
       throw new Error(`Unknown configuration field: ${key}`);
   for (const key of [
     "port",
+    "concurrency",
     "queueCapacity",
     "maxQueueWaitMs",
     "minStartIntervalMs",
@@ -59,7 +62,11 @@ export function validateConfig(value: unknown): Config {
     if (c[key] > 2147483647)
       throw new Error(`Timer exceeds supported range: ${key}`);
   if (c.port > 65535) throw new Error("Invalid port");
-  for (const key of ["maxRequests", "stopAfterTokens"] as const)
+  for (const key of [
+    "maxRequests",
+    "stopAfterTokens",
+    "maxRequestsPerMinute",
+  ] as const)
     if (c[key] !== null && (!Number.isSafeInteger(c[key]) || c[key]! <= 0))
       throw new Error(`Invalid ${key}`);
   if (!["strict", "lotus"].includes(c.profile))

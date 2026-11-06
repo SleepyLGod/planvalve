@@ -1,4 +1,15 @@
 export type ObjectValue = Record<string, unknown>;
+export type RateDecision =
+  | { action: "none" }
+  | { action: "cooldown"; delayMs: number; reason: string; slowDown: boolean }
+  | { action: "pause"; reason: string };
+export interface DispatchSnapshot {
+  state: "ready" | "spacing" | "cooldown" | "paused" | "closed";
+  waitMs: number;
+  reason: string | null;
+  effectiveStartIntervalMs: number;
+  maxRequestsPerMinute: number | null;
+}
 export interface Fixture {
   name?: string;
   events: ObjectValue[];
@@ -11,6 +22,8 @@ export interface Config {
   model: string | null;
   authPath: string;
   port: number;
+  concurrency: number;
+  maxRequestsPerMinute: number | null;
   fixturePath: string;
   queueCapacity: number;
   maxQueueWaitMs: number;
@@ -49,6 +62,11 @@ export interface LedgerRecord {
   outputFormat?: string;
   transformations: { parameter: string; requested: unknown; effect: string }[];
   rawUsage?: ObjectValue;
+  rateLimit?: {
+    observedAt: string;
+    headers: Record<string, string>;
+    decision: RateDecision;
+  };
   upstreamHttp?: { status: number; requestId?: string; retryAfter?: string };
   upstreamError?: ObjectValue;
   upstreamIncompleteDetails?: ObjectValue;
@@ -84,6 +102,8 @@ export interface StatusSnapshot {
   upstream?: UpstreamKind;
   authorization?: { state: string };
   pauseReason?: string;
+  dispatch?: DispatchSnapshot;
+  upstreamLimits?: { observedAt: string; headers: Record<string, string> };
   accountBalance?: "unknown";
   actualCost?: "unknown";
   asOf: string;
@@ -92,6 +112,8 @@ export interface StatusSnapshot {
   queue: {
     concurrency: number;
     running: number;
+    preparing?: number;
+    inFlight?: number;
     waiting: number;
     capacity: number;
     paused: boolean;

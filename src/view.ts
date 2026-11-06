@@ -402,6 +402,22 @@ export function render(
         ` ${t("启动间隔")} ${s.queue.minStartIntervalMs} ${t("毫秒")} · ${t("历史存储")} ${s.storage.healthy ? t("正常") : t("异常")} · ${t("本次运行")} ${s.runId.slice(0, 8)}`,
         "90",
       );
+      line(
+        ` ${t("上游在途")} ${count(s.queue.inFlight)} · ${t("准备中")} ${count(s.queue.preparing)} · ${t("每分钟上限")} ${s.dispatch ? (s.dispatch.maxRequestsPerMinute ?? t("不限")) : t("未知")}`,
+      );
+      if (s.dispatch) {
+        const labels = {
+          ready: "可派发",
+          spacing: "节奏等待",
+          cooldown: "上游冷却",
+          paused: "已暂停",
+          closed: "已停止",
+        };
+        line(
+          ` ${t("等待派发")} ${t(labels[s.dispatch.state])} · ${s.dispatch.waitMs} ${t("毫秒")} · ${t("生效间隔")} ${s.dispatch.effectiveStartIntervalMs} ${t("毫秒")}`,
+          s.dispatch.state === "cooldown" ? "33" : "90",
+        );
+      }
       if (s.mode === "openai-api-key" || s.mode === "chatgpt-subscription") {
         line(
           ` ${t("授权")} ${t(s.authorization?.state ?? "未知")} · ${t("账号余额")} ${t("未知")} · ${t("实际费用")} ${t("未知")}`,

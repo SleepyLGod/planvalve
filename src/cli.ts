@@ -75,7 +75,7 @@ if (args.length && !(args.length === 2 && args[0] === "--config")) {
       }),
     );
   } catch (error) {
-    subscription?.close();
+    await subscription?.close();
     await closeOnError?.().catch((cleanupError) =>
       console.error("Cleanup failed:", String(cleanupError)),
     );

@@ -2,9 +2,9 @@
 
 [简体中文](README.zh-CN.md)
 
-A small local OpenAI-compatible gateway for your own ChatGPT subscription or OpenAI API key: one FIFO queue, token accounting, SQLite history, and a Chinese/English terminal dashboard. LOTUS/LiteLLM is one use case; ordinary SDKs and scripts work through the same interface.
+A small local OpenAI-compatible gateway for your own ChatGPT subscription or OpenAI API key: one FIFO queue, token accounting, SQLite history, and a Chinese/English terminal dashboard. OpenAI SDKs, LiteLLM and other compatible clients use the same interface. LOTUS and agent-memory workflows are optional examples.
 
-**Prototype.** The default is an offline fixture. Offline tests cover both upstreams. Separately authorized live checks passed for subscription text/JSON, usage, authorization reuse across restart, token renewal, and one native LOTUS `sem_map`. These are small integration checks, not long-running service validation. It is an independent project implemented against public OpenAI documentation, not an OpenAI-certified product.
+**Prototype.** The default is an offline fixture. Offline tests cover both upstreams. Separately authorized live checks passed for subscription text/JSON, usage, authorization reuse across restart, token renewal, native LOTUS `sem_map` and the independent LiteLLM example. The latest two-request check also observed concurrency 2 with a 3-second send interval; default concurrency remains 1. These are small integration checks, not validation of real rate-limit recovery or long-running service. See the [verification record](docs/offline-verification.md), including an earlier failed test-harness run. It is an independent project implemented against public OpenAI documentation, not an OpenAI-certified product.
 
 ## Start offline
 
@@ -54,9 +54,13 @@ Examples can read the same protected connection settings without copying the key
 ```bash
 node examples/client.mjs --local
 python3 -B examples/client.py --local
+# Use an existing Python environment with LiteLLM installed:
+/path/to/existing/venv/bin/python -B examples/litellm_client.py --local
 ```
 
 **These example commands send requests.** Initialization, startup and monitoring do not. `--local` and `--direct` are mutually exclusive. Other clients need the same base URL/model/local key; the examples demonstrate reading the private file without printing it.
+
+The LiteLLM example requires `--local`, reuses the protected settings reader, and prints one JSON result with text and usage. It does not import LOTUS/agent-memory, read subscription tokens, log in, install dependencies or fetch a model catalog. Both retry layers are disabled; its explicit SDK transport ignores environment proxies and redirects. Errors exit unsuccessfully without resending. The ordinary SDK examples also support `--direct`; the LiteLLM example deliberately accepts only `--local`.
 
 ## Choose an upstream
 
@@ -97,7 +101,9 @@ node examples/client.mjs
 python3 -B examples/client.py
 ```
 
-LOTUS may send subscription-unsupported parameters by default. Explicitly select `profile: "lotus"` for that use case; omissions are recorded and do not enforce the omitted settings. The generic default is `strict`. Follow the [LOTUS local-use guide](docs/lotus.md) for saved-key access, single-worker setup, zero retries and the observed live result: `{"answer":2}`, 59 input / 12 output / 71 total tokens. Those counts are one observation, not a fixed response or forecast.
+LiteLLM uses `openai/<configured-model>`, the same local `/v1` base URL and local client key; set `num_retries=0` and exclude loopback from environment proxies. See the [LiteLLM integration guide (中文)](docs/litellm-integration.md).
+
+The default compatibility strategy is `strict`. [LOTUS](docs/lotus.md) and [agent-memory (中文)](docs/agent-memory-example.md) are optional examples; explicitly select `profile: "lotus"` only when that client requires recorded omission of unsupported defaults. Omitted constraints are not enforced.
 
 With an API key, `node examples/client.mjs --direct` or `python3 -B examples/client.py --direct` bypasses the gateway and uses the official API. Set `MODEL` to your real model. Direct requests have no gateway queue, local history or real-time TUI; use the official Usage dashboard for platform accounting.
 
@@ -106,9 +112,9 @@ With an API key, `node examples/client.mjs --direct` or `python3 -B examples/cli
 - Text messages, one completion, non-streaming client responses; text, JSON object and JSON schema. No tools, embeddings, image input, transparent agent runtime or general provider framework.
 - Subscription requests use official Responses with `store:false` and `stream:true`; system roles become developer roles. API-key requests use official Chat Completions, preserve roles, and support `temperature`, `top_p`, `max_tokens` and `max_completion_tokens`. Unsupported fields fail explicitly.
 - No added agent prompt, project files or implicit history; no JSON repair calls, deduplication, fallback billing or gateway/SDK retries. Clients must configure their own retries explicitly; our examples set them to zero.
-- Concurrency is 1. Real modes default to a 3-second minimum start interval; this is a local default, not an official safe threshold. Request and observed-token budgets apply per run; the last call may exceed the token threshold. Restarting resets local budgets, not upstream limits.
+- Concurrency is configurable with `concurrency` (default 1). Real modes default to a 3-second minimum actual-send interval. Optional `maxRequestsPerMinute` defaults to `null`; it smooths sends rather than allowing minute-boundary bursts. For example, concurrency 4 with 20 RPM permits overlapping calls but starts them at least 3 seconds apart. These are local policies, not official safe thresholds. Request budgets cannot oversend; already dispatched calls may take observed tokens past the stop threshold.
 - **Concurrency 1 can still hit RPM/TPM limits. Other applications may share official limits. Only traffic through this gateway is controlled; rate-limit or account-enforcement avoidance is not guaranteed.** See [official rate limits](https://developers.openai.com/api/docs/guides/rate-limits).
-- Upstream failures pause dispatch. The failed call is never automatically resent. Status records the reason, HTTP metadata and `Retry-After` when supplied; that header is not a promise of quota recovery. Check the cause before restarting.
+- Recognized temporary rate/overload errors with reliable waiting hints delay unsent work, then allow later calls to continue; the failed call is never resent. `slow_down` also doubles this run's effective interval, without changing concurrency or automatically speeding back up. Quota, balance, permission, unknown failures and storage errors pause dispatch. An unsent task's deadline ends only that task. Status records the reason and timing hints, which do not promise quota recovery. Restarting resets local scheduling and budgets, not upstream limits.
 - Success requires completed output and valid usage. Responses streams stop at the terminal event rather than waiting for EOF. Missing cache/reasoning detail stays unknown; subsets are not added twice to total tokens. Balance and actual cost remain unknown.
 
 ## Data and security
@@ -123,6 +129,8 @@ Real model and monitoring routes require the local key and valid loopback Host/O
 npm run typecheck
 npm run build
 npm test
+# Optional: direct LiteLLM acceptance, without importing LOTUS or agent-memory:
+GATEWAY_LITELLM_PYTHON=/path/to/existing/venv/bin/python npm run test:litellm
 # Optional: use an existing LOTUS environment, without installing or changing it:
 GATEWAY_LOTUS_PYTHON=/path/to/existing/venv/bin/python npm run test:lotus
 ```
@@ -131,6 +139,8 @@ Tests deny non-loopback connections. CI runs these offline checks on Linux and m
 
 - [Configuration](docs/configuration.md) · [Protocol](docs/protocol.md) · [Dashboard](docs/status.md)
 - [Authorization](docs/authorization.md) · [Bounded live probe](docs/live-probe.md)
+- [LiteLLM integration (中文)](docs/litellm-integration.md) · [TODO (中文)](TODO.md)
+- [Cross-machine design (中文)](docs/remote-use.md) · [Optional research example (中文)](docs/agent-memory-example.md)
 - [Verification](docs/offline-verification.md) · [Troubleshooting](docs/troubleshooting.md)
 - [Fixture provenance](fixtures/README.md) · [Publication review](docs/privacy-review.md)
 

@@ -4,6 +4,8 @@
 
 LOTUS is a client example, not a gateway dependency. Reuse a Python environment that already contains LOTUS, LiteLLM and pandas. Run the commands below from the gateway project root; no changes to a research repository or its dependencies are required.
 
+See the [general LiteLLM guide (中文)](litellm-integration.md) for ordinary clients and the [agent-memory example (中文)](agent-memory-example.md) for that research repository's specific settings and limitations. Those case requirements do not define the gateway's core scope.
+
 ## Start the gateway
 
 For a new installation, initialize once with an eligible model and authorize your own account:

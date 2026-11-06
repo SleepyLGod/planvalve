@@ -5,6 +5,64 @@ import { get } from "node:http";
 import { createGateway } from "../src/gateway.ts";
 import { validateConfig } from "../src/config.ts";
 import { History } from "../src/history.ts";
+import { officialUpstream } from "../src/upstream.ts";
+import { Redactor } from "../src/privacy.ts";
+import type { LedgerRecord } from "../src/types.ts";
+test("request records and dispatch callbacks remain isolated under reversed completion", async () => {
+  const calls = [0, 0];
+  const records: LedgerRecord[] = [0, 1].map((n) => ({
+    id: String(n),
+    sequence: n,
+    status: "running",
+    receivedAt: new Date().toISOString(),
+    requestHash: "test",
+    transformations: [],
+  }));
+  const upstream = officialUpstream(
+    "openai-api-key",
+    {
+      accessToken: async () => "fake",
+      status: () => ({ state: "configured" }),
+      close() {},
+    },
+    async (_url, init) => {
+      const n = Number(JSON.parse(String(init?.body)).messages[0].content);
+      await new Promise((resolve) => setTimeout(resolve, n === 0 ? 40 : 1));
+      return Response.json(
+        {
+          ...result,
+          usage: { ...raw, prompt_tokens: 58 + n, total_tokens: 71 + n },
+        },
+        { headers: { "x-request-id": "upstream-" + n } },
+      );
+    },
+    new Redactor(),
+  );
+  await Promise.all(
+    records.map((record, n) =>
+      upstream.complete(
+        {
+          model: "test-model",
+          messages: [{ role: "user", content: String(n) }],
+        },
+        AbortSignal.timeout(2000),
+        record,
+        () => {
+          calls[n]!++;
+        },
+      ),
+    ),
+  );
+  assert.deepEqual(calls, [1, 1]);
+  assert.deepEqual(
+    records.map((r) => r.upstreamHttp?.requestId),
+    ["upstream-0", "upstream-1"],
+  );
+  assert.deepEqual(
+    records.map((r) => r.usage?.prompt_tokens),
+    [58, 59],
+  );
+});
 const raw = {
   prompt_tokens: 58,
   completion_tokens: 13,
@@ -51,6 +109,151 @@ function server(send: typeof fetch, extra = {}) {
     },
   );
 }
+test("configured HTTP concurrency reaches four while request budget cannot oversend", async (t) => {
+  for (const [concurrency, maxRequests] of [
+    [1, null],
+    [2, null],
+    [4, null],
+    [4, 1],
+  ] as const) {
+    let active = 0,
+      peak = 0,
+      calls = 0;
+    const gateway = server(
+      async () => {
+        calls++;
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 3));
+        active--;
+        return Response.json(result);
+      },
+      { concurrency, maxRequests },
+    );
+    t.after(() => gateway.close());
+    const url = await gateway.listen();
+    const responses = await Promise.all(
+      Array.from({ length: 64 }, () =>
+        fetch(url + "/v1/chat/completions", {
+          method: "POST",
+          headers: { authorization: "Bearer test-local-secret" },
+          body: JSON.stringify(request),
+        }),
+      ),
+    );
+    await Promise.all(responses.map((r) => r.json()));
+    assert.equal(calls, maxRequests === null ? 64 : 1);
+    assert.equal(peak, maxRequests === null ? concurrency : 1);
+  }
+});
+test("temporary rate failure is not retried and a later independent request continues after cooldown", async (t) => {
+  let calls = 0;
+  const sends: number[] = [];
+  const gateway = server(async () => {
+    calls++;
+    sends.push(performance.now());
+    return calls === 1
+      ? Response.json(
+          { error: { code: "rate_limit_exceeded" } },
+          {
+            status: 429,
+            headers: {
+              "retry-after": "0",
+              "x-ratelimit-remaining-requests": "0",
+            },
+          },
+        )
+      : Response.json(result);
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+  const post = () =>
+    fetch(url + "/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: "Bearer test-local-secret" },
+      body: JSON.stringify(request),
+    });
+  assert.equal((await post()).status, 429);
+  assert.equal((await post()).status, 200);
+  assert.equal(calls, 2);
+  assert.equal(gateway.report().paused, false);
+  assert.equal(gateway.records[0]!.rateLimit?.decision.action, "cooldown");
+});
+test("a hard pause preserves other in-flight results and cannot be cleared by their success", async (t) => {
+  let calls = 0,
+    release!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const gateway = server(
+    async () => {
+      const n = ++calls;
+      if (n === 4) release();
+      await barrier;
+      if (n === 1)
+        return Response.json(
+          { error: { code: "credit_balance_exhausted" } },
+          { status: 429, headers: { "retry-after": "0" } },
+        );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return Response.json(result);
+    },
+    { concurrency: 4 },
+  );
+  t.after(() => {
+    release();
+    return gateway.close();
+  });
+  const url = await gateway.listen();
+  const responses = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      fetch(url + "/v1/chat/completions", {
+        method: "POST",
+        headers: { authorization: "Bearer test-local-secret" },
+        body: JSON.stringify(request),
+      }),
+    ),
+  );
+  await Promise.all(responses.map((r) => r.json()));
+  assert.equal(calls, 4);
+  assert.equal(responses.filter((r) => r.status === 200).length, 3);
+  assert.equal(gateway.status().queue.paused, true);
+  assert.equal(gateway.status().pauseReason, "credit_balance_exhausted");
+  assert.equal(gateway.report().totals.totalTokens, 213);
+});
+test("unsent cooldown deadline ends only that request and retains recoverable sender state", async (t) => {
+  let calls = 0;
+  const gateway = server(
+    async () => {
+      calls++;
+      return calls === 1
+        ? Response.json(
+            { error: { code: "rate_limit_exceeded" } },
+            { status: 429, headers: { "retry-after": "1" } },
+          )
+        : Response.json(result);
+    },
+    { upstreamTimeoutMs: 20 },
+  );
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+  const post = () =>
+    fetch(url + "/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: "Bearer test-local-secret" },
+      body: JSON.stringify(request),
+    });
+  assert.equal((await post()).status, 429);
+  const expired = await post();
+  assert.equal(expired.status, 429);
+  assert.equal((await expired.json()).error.code, "dispatch_expired");
+  assert.equal(calls, 1);
+  assert.equal(gateway.status().queue.paused, false);
+  assert.equal(gateway.status().dispatch?.state, "cooldown");
+  await new Promise((resolve) => setTimeout(resolve, 1300));
+  assert.equal((await post()).status, 200);
+  assert.equal(calls, 2);
+});
 test("subscription spacing measures actual sends after a slow credential refresh", async (t) => {
   const { readFileSync } = await import("node:fs");
   const fixture = JSON.parse(
@@ -315,7 +518,7 @@ test("real-mode model and status routes require local key, reject cross-origin a
   assert.equal(gateway.records.length, 0);
 });
 test("upstream rate limit pauses once, distinguishes exhausted balance and redacts reflected credentials", async (t) => {
-  for (const code of ["rate_limit_exceeded", "credit_balance_exhausted"]) {
+  for (const code of ["credit_balance_exhausted"]) {
     let calls = 0;
     const gateway = server(async () => {
       calls++;
@@ -580,13 +783,14 @@ test("absolute request deadline bounds credential acquisition and does not count
     headers: { authorization: "Bearer test-local-secret" },
     body: JSON.stringify(request),
   });
-  assert.equal(r.status, 502);
+  assert.equal(r.status, 429);
   assert(Date.now() - start < 300);
   assert.equal(sends, 0);
   assert.equal(gateway.report().realAttempts, 0);
-  assert.equal(gateway.records[0]!.endReason, "timeout");
-  assert.equal(gateway.records[0]!.status, "failed");
-  assert.equal(gateway.records[0]!.error, "upstream_timeout");
+  assert.equal(gateway.records[0]!.endReason, "dispatch_expired");
+  assert.equal(gateway.records[0]!.status, "expired");
+  assert.equal(gateway.records[0]!.error, "dispatch_expired");
+  assert.equal(gateway.status().queue.paused, false);
   assert.equal(gateway.records[0]!.upstreamError, undefined);
   assert.equal(gateway.report().totals.unknownUsageRequests, 0);
   assert.equal(gateway.report().totals.reasoning.unknownRequests, 0);

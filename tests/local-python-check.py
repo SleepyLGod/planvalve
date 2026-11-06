@@ -1,4 +1,4 @@
-"""Run the local Python SDK example with external networking and writes blocked."""
+"""Run a local Python client with external networking and writes blocked."""
 import os
 from pathlib import Path
 import runpy
@@ -25,17 +25,29 @@ def audit(event: str, args: tuple[object, ...]) -> None:
         raise PermissionError("UDP denied")
     if event == "open" and isinstance(args[0], (str, bytes, os.PathLike)):
         path = Path(os.fsdecode(args[0])).absolute()
-        if ".codex" in path.parts or path.name.startswith(".env"):
+        if ".codex" in path.parts or path.name.startswith(".env") or path.is_relative_to(root / "data/auth"):
             denials.append("protected-config")
             raise PermissionError("Protected configuration read denied")
         flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
         if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC) and path != Path("/dev/null") and not path.is_relative_to(root):
             denials.append("external-write")
             raise PermissionError("External write denied")
+    if event in {"os.mkdir", "os.rename", "os.remove", "os.rmdir"}:
+        paths = args[:2] if event == "os.rename" else args[:1]
+        for value in paths:
+            if isinstance(value, (str, bytes, os.PathLike)):
+                path = Path(os.fsdecode(value)).absolute()
+                if not path.is_relative_to(root):
+                    denials.append("external-mutation")
+                    raise PermissionError("External mutation denied")
+        if event in {"os.remove", "os.rmdir"}:
+            denials.append("deletion")
+            raise PermissionError("Deletion disabled in client check")
 
 
 sys.addaudithook(audit)
-sys.argv = [str(example), "--local"]
+sys.path.insert(0, str(example.parent))
+sys.argv = [str(example), *(sys.argv[2:] or ["--local"])]
 try:
     runpy.run_path(str(example), run_name="__main__")
 finally:

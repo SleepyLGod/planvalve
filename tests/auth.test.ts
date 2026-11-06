@@ -94,6 +94,93 @@ async function loggedIn(file = path()) {
   await login.done;
   return { file, store, callback };
 }
+test("one refresh waiter cancellation does not cancel another or discard rotation", async () => {
+  const { store } = await loggedIn();
+  const record = store.read();
+  record.credentials!.expires_at = 0;
+  store.save(record);
+  let refreshes = 0;
+  const ordinary = official(() => {
+    throw new Error("unexpected token call");
+  });
+  const session = new AuthSession(store, {
+    fetch: async (url, init) => {
+      if (!String(url).includes("/oauth/token")) return ordinary(url, init);
+      refreshes++;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 30);
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(init.signal!.reason);
+          },
+          { once: true },
+        );
+      });
+      return Response.json({
+        ...tokens(""),
+        access_token: "rotated-access",
+        refresh_token: "rotated-refresh",
+      });
+    },
+  });
+  const abort = new AbortController();
+  const outcomes = Promise.allSettled([
+    session.accessToken(abort.signal),
+    session.accessToken(),
+  ]);
+  setTimeout(() => abort.abort(), 5);
+  const [first, second] = await outcomes;
+  await session.close();
+  assert.equal(first!.status, "rejected");
+  assert.equal(second!.status, "fulfilled");
+  assert.equal(refreshes, 1);
+  assert.equal(store.read().credentials!.refresh_token, "rotated-refresh");
+});
+test("close joins shared refresh and saves rotated credentials before releasing its process lock", async () => {
+  const { store } = await loggedIn();
+  const record = store.read();
+  record.credentials!.expires_at = 0;
+  store.save(record);
+  let release!: () => void, started!: () => void;
+  const responseReady = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const sent = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const ordinary = official(() => {
+    throw new Error("unexpected refresh");
+  });
+  const session = new AuthSession(store, {
+    fetch: async (url, init) => {
+      if (!String(url).includes("/oauth/token")) return ordinary(url, init);
+      started();
+      await responseReady;
+      return Response.json({
+        ...tokens(""),
+        access_token: "close-rotated-access",
+        refresh_token: "close-rotated-refresh",
+      });
+    },
+  });
+  const access = session.accessToken();
+  await sent;
+  const closing = session.close();
+  assert.throws(() => store.acquire(), /another process/);
+  await assert.rejects(session.accessToken(), /closed/);
+  release();
+  await access;
+  await closing;
+  assert.equal(
+    store.read().credentials!.refresh_token,
+    "close-rotated-refresh",
+  );
+  const next = new AuthSession(store, { fetch: ordinary });
+  assert.equal(await next.accessToken(), "close-rotated-access");
+  await next.close();
+});
 test("OAuth login is independent, verifies identity, persists private credentials, and never sends inference", async () => {
   const { file, store, callback } = await loggedIn();
   const record = store.read();
@@ -107,7 +194,7 @@ test("OAuth login is independent, verifies identity, persists private credential
     }),
   });
   assert.equal(await session.accessToken(), "test-access-secret");
-  session.close();
+  await session.close();
   const again = await beginLogin(store, {
     fetch: official(() => {
       throw Error("no callback expected");
@@ -209,7 +296,7 @@ test("refresh rotates tokens once, preserves credentials on temporary failures, 
   );
   assert.equal(calls, 1);
   assert.equal(store.read().credentials!.refresh_token, "rotated-refresh");
-  session.close();
+  await session.close();
   const expired = store.read();
   expired.credentials!.expires_at = 0;
   store.save(expired);
@@ -220,14 +307,14 @@ test("refresh rotates tokens once, preserves credentials on temporary failures, 
   });
   await assert.rejects(failed.accessToken());
   assert.equal(readFileSync(file, "utf8"), before);
-  failed.close();
+  await failed.close();
   const revoked = new AuthSession(store, {
     fetch: async () =>
       Response.json({ error: "invalid_grant" }, { status: 400 }),
   });
   await assert.rejects(revoked.accessToken());
   assert.equal(store.status().state, "login-required");
-  revoked.close();
+  await revoked.close();
 });
 test("callback state and replay are rejected, logout clears tokens and reports unconfirmed revocation", async () => {
   const file = path(),
@@ -257,7 +344,7 @@ test("callback state and replay are rejected, logout clears tokens and reports u
   const outcome = await session.logout();
   assert.equal(outcome.remoteRevoked, false);
   assert.equal(store.read().credentials, undefined);
-  session.close();
+  await session.close();
   assert.equal(store.read().client_id, "issued-test-client");
 });
 test("credential storage refuses an existing shared directory instead of changing unrelated permissions", async () => {
@@ -315,16 +402,18 @@ test("logout confirms empty-200 revocation and retains only registration metadat
   assert.deepEqual(await session.logout(), { remoteRevoked: true });
   assert(revoked);
   assert.equal(store.status().state, "login-required");
-  session.close();
+  await session.close();
 });
-test("request cancellation aborts token renewal and preserves stored credentials", async () => {
+test("session cancellation bounds shared renewal and preserves stored credentials", async () => {
   const { store } = await loggedIn();
   const record = store.read();
   record.credentials!.expires_at = 0;
   store.save(record);
   const before = readFileSync(store.path, "utf8");
   let cancelled = false;
+  const sessionAbort = new AbortController();
   const session = new AuthSession(store, {
+    signal: sessionAbort.signal,
     fetch: async (_url, init) =>
       new Promise<Response>((_resolve, reject) => {
         init!.signal!.addEventListener(
@@ -339,9 +428,12 @@ test("request cancellation aborts token renewal and preserves stored credentials
   });
   try {
     await assert.rejects(session.accessToken(AbortSignal.timeout(20)));
+    assert.equal(cancelled, false);
+    sessionAbort.abort();
+    await new Promise((resolve) => setTimeout(resolve, 1));
     assert(cancelled);
     assert.equal(readFileSync(store.path, "utf8"), before);
   } finally {
-    session.close();
+    await session.close();
   }
 });

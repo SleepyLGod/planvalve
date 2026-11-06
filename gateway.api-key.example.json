@@ -6,5 +6,7 @@
   "maxRequests": 1000,
   "stopAfterTokens": 100000,
   "databasePath": "./data/gateway.sqlite",
-  "reportPath": "./reports/latest.json"
+  "reportPath": "./reports/latest.json",
+  "concurrency": 1,
+  "maxRequestsPerMinute": null
 }

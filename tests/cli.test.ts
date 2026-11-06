@@ -4,6 +4,20 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { loadConfig, validateConfig } from "../src/config.ts";
 const root = new URL("..", import.meta.url);
+test("scheduling configuration preserves defaults and validates finite positive limits", () => {
+  const defaults = validateConfig({});
+  assert.equal(defaults.concurrency, 1);
+  assert.equal(defaults.maxRequestsPerMinute, null);
+  const configured = validateConfig({
+    concurrency: 4,
+    maxRequestsPerMinute: 20,
+  });
+  assert.equal(configured.concurrency, 4);
+  assert.equal(configured.maxRequestsPerMinute, 20);
+  for (const n of [0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1, "4"])
+    for (const key of ["concurrency", "maxRequestsPerMinute"])
+      assert.throws(() => validateConfig({ [key]: n }));
+});
 test("config refuses arbitrary network endpoints and invalid limits", () => {
   for (const c of [
     { upstreamUrl: "https://api.openai.com" },
