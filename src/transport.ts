@@ -34,7 +34,10 @@ export function trackResponse(response: Response): {
         }
       }
     },
-    cancel,
+    cancel(reason) {
+      // Let SDK errors propagate now; settle() still owns the real cleanup and slot lifetime.
+      void cancel(reason);
+    },
   });
   return {
     response: new Response(body, {

@@ -1,5 +1,19 @@
 # Offline verification
 
+## Stream-error feedback fix — 2026-11-07
+
+PR review found a conditional correctness gap, rather than an observed real-account incident. Official Responses supports separate `error` events; whether a particular subscription quota error is actually delivered in that form was not established. A fake slow-cancellation case at concurrency 2 reproduced an extra send even with the 3000 ms interval; ordinary native-fetch loopback controls did not oversend. The review's initial P1 priority was subsequently narrowed to a P2 correctness issue to fix before merge.
+
+The fix centralizes code validation, redaction, status mapping and failure feedback for `response.failed`/`response.incomplete`, explicit error events and SDK-thrown stream errors. The body adapter acknowledges cancellation to the SDK without waiting for the underlying cleanup; the existing gateway owner still awaits the real cleanup promise before releasing the slot or returning. Cleanup rejection remains an error, not HTTP success. No queue algorithm, dependency, provider, configuration field or authentication flow was added.
+
+Four regression scenarios were observed failing before the change: explicit/named SSE quota feedback during slow cancellation, and explicit/named quota responses over native loopback HTTP. After fixing, both persistent subscription and capped-probe paths retain one send, report the exact quota code/429, pause subsequent sends, and retain the cleaning slot. The controls also cover original response.failed feedback, credential-reflecting diagnostics and completion followed by cleanup failure.
+
+Type checking and build passed; the final targeted stream/upstream suite passed **36/36**. The first full run passed 117/118: the existing `failed preparation and unsent expiry do not poison admission or clear cooldown` test assumed its 45 ms wall-clock cooldown would still be active after an overloaded event-loop turn. It now uses the existing injectable clock, explicitly advances 5 ms before expiry, and verifies 40 ms remains. Its four-test unit suite passed, then the Python-enabled suite passed **118/118**. A further native-HTTP success control passed for completed output/usage with an open transport tail. The expanded run passed 118/119, hitting the previously observed 1.5-second CLI startup watchdog under load. That leak check now allows 10 seconds for process startup and additionally requires the intended EISDIR report-write failure plus exit code 1. Its 12-test CLI suite passed. The final expanded Python-enabled suite passed **119/119**, 0 failed and 0 skipped. Both original timing failures remain in the evidence rather than being counted as passes.
+
+Independent LiteLLM acceptance passed **12/12**, with 12 client requests, 11 mocked upstream attempts and zero proxy requests. Installed LOTUS LM, native sem_map and the official Python SDK passed with three mocked calls and usage 58/13/71 each; protected source/dependencies were unchanged and external-network attempts were empty. Token validation does not verify pricing.
+
+All calls in this fix were fake or loopback-only under the network guard. No model, browser login or OAuth renewal request was made; daily configuration, local key and authorization content/metadata remained unchanged. Evidence stays in ignored `reports/stream-error-fix-*/`. Existing real results below predate this fix; real quota-stream delivery, cancellation latency and long-running recovery are still unverified. The fix is saved on the private PR branch, without merging main or publishing the repository.
+
 ## Private scheduling closeout — 2026-11-07
 
 This closeout adds no feature, model request, login or renewal. It updates the bilingual READMEs, LiteLLM guide, TODO and historical design notes to reflect the separately authorized checks below, including the failed test-harness run. Saved daily configuration, client key and authorization content/metadata remained unchanged. Source and private evidence are reviewed separately; runtime reports are not committed.
@@ -16,10 +30,10 @@ The **first run failed client acceptance**: both official Responses requests ret
 
 A **new, separately authorized run** then passed using the corrected harness, which observes the existing ledger without wrapping the upstream response body:
 
-| Request | Client output | Client elapsed, including waiting | Input tokens | Output tokens | Total |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Text | `OK` | 3.383 s | 10 | 5 | 15 |
-| JSON schema | `{"answer":2}` | 6.340 s | 45 | 12 | 57 |
+| Request     | Client output  | Client elapsed, including waiting | Input tokens | Output tokens | Total |
+| ----------- | -------------- | --------------------------------: | -----------: | ------------: | ----: |
+| Text        | `OK`           |                           3.383 s |           10 |             5 |    15 |
+| JSON schema | `{"answer":2}` |                           6.340 s |           45 |            12 |    57 |
 
 - Exactly two client POSTs and two official Responses POSTs, all HTTP 200; no retry, model-catalog request, browser login or authorization-network request. The saved session was reused without renewal in this second run.
 - Maximum observed in-flight count was 2. Actual sends were 3003 ms apart; the second started before the first terminal event, overlapping by about 356 ms. This proves a small real overlap, not real concurrency 4 or a large batch.
@@ -140,7 +154,7 @@ These were manual, bounded online checks, not part of the offline suite or CI:
 
 The LOTUS run temporarily selected `profile: "lotus"`, recorded omission of default `temperature=0` and `max_tokens=512`, and imposed a one-request budget plus a transport cap. Python networking was loopback-only, caches were isolated, dotenv discovery and bytecode writes were disabled, and no dependencies were installed. The Node upstream guard allowed only the single official Responses POST and, if needed, bounded OAuth renewal; it made no extra model discovery call.
 
-Private evidence remains under ignored reports/live-restart-*/, reports/token-refresh-*/ and reports/live-lotus-*/. No extra inference was sent to validate documentation. See [LOTUS guide](lotus.md) / [中文指南](lotus.zh-CN.md) for usage and scope. These checks do not validate API-key billing, a full LOTUS benchmark, higher concurrency, other accounts or long-running reliability.
+Private evidence remains under ignored reports/live-restart-_/, reports/token-refresh-_/ and reports/live-lotus-*/. No extra inference was sent to validate documentation. See [LOTUS guide](lotus.md) / [中文指南](lotus.zh-CN.md) for usage and scope. These checks do not validate API-key billing, a full LOTUS benchmark, higher concurrency, other accounts or long-running reliability.
 
 ## Private development-branch closeout, 2026-11-06
 

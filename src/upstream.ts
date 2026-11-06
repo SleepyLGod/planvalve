@@ -93,6 +93,25 @@ export async function responsesText(
   redact: Redactor,
   onFailure: (error: GatewayError) => void = () => {},
 ): Promise<string> {
+  const fail = (rawCode: unknown, fallback = "upstream_failed") => {
+    const code =
+      typeof rawCode === "string" && /^[a-zA-Z0-9_]{1,100}$/.test(rawCode)
+        ? rawCode
+        : fallback;
+    record.terminalAt ??= new Date().toISOString();
+    record.upstreamError = redact.value({ code });
+    const failure = new GatewayError(
+      code === "subscription_sharing_usage_limit_exceeded"
+        ? 429
+        : code === "subscription_sharing_usage_unavailable"
+          ? 503
+          : 502,
+      redact.text(code),
+      "Upstream did not complete normally",
+    );
+    onFailure(failure);
+    return failure;
+  };
   let refused = false;
   let text = "",
     doneText: string | undefined,
@@ -102,79 +121,62 @@ export async function responsesText(
     { signal },
   );
   record.headersAt ??= new Date().toISOString();
-  for await (const event of stream) {
-    if (signal.aborted)
-      throw new GatewayError(
-        502,
-        "upstream_timeout",
-        "Absolute upstream deadline exceeded",
-      );
-    if (event.type === "response.output_text.delta") {
-      record.firstTextAt ??= new Date().toISOString();
-      text += event.delta;
-    } else if (
-      event.type === "response.refusal.delta" ||
-      event.type === "response.refusal.done"
-    ) {
-      refused = true;
-    } else if (event.type === "response.output_text.done")
-      doneText = event.text;
-    else if (
-      ["response.completed", "response.failed", "response.incomplete"].includes(
-        event.type,
-      )
-    ) {
-      terminal = event as any;
-      record.terminalAt = new Date().toISOString();
-      if (object(terminal.response?.error))
-        record.upstreamError = redact.value({
-          code:
-            typeof terminal.response.error.code === "string" &&
-            /^[a-zA-Z0-9_]{1,100}$/.test(terminal.response.error.code)
-              ? terminal.response.error.code
-              : "upstream_failed",
-        });
-      if (object(terminal.response?.incomplete_details))
-        record.upstreamIncompleteDetails = redact.value(
-          terminal.response.incomplete_details,
+  try {
+    for await (const event of stream) {
+      if (signal.aborted)
+        throw new GatewayError(
+          502,
+          "upstream_timeout",
+          "Absolute upstream deadline exceeded",
         );
-      captureUsage(record, terminal.response?.usage, redact);
-      if (
-        terminal.type !== "response.completed" ||
-        terminal.response?.status !== "completed"
+      if (event.type === "response.output_text.delta") {
+        record.firstTextAt ??= new Date().toISOString();
+        text += event.delta;
+      } else if (
+        event.type === "response.refusal.delta" ||
+        event.type === "response.refusal.done"
       ) {
-        const rawCode = terminal.response?.error?.code;
-        const code =
-          typeof rawCode === "string" && /^[a-zA-Z0-9_]{1,100}$/.test(rawCode)
-            ? rawCode
-            : terminal.type === "response.incomplete"
+        refused = true;
+      } else if (event.type === "response.output_text.done")
+        doneText = event.text;
+      else if (
+        [
+          "response.completed",
+          "response.failed",
+          "response.incomplete",
+        ].includes(event.type)
+      ) {
+        terminal = event as any;
+        record.terminalAt = new Date().toISOString();
+        if (object(terminal.response?.incomplete_details))
+          record.upstreamIncompleteDetails = redact.value(
+            terminal.response.incomplete_details,
+          );
+        captureUsage(record, terminal.response?.usage, redact);
+        if (
+          terminal.type !== "response.completed" ||
+          terminal.response?.status !== "completed"
+        ) {
+          throw fail(
+            terminal.response?.error?.code,
+            terminal.type === "response.incomplete"
               ? "upstream_incomplete"
-              : "upstream_failed";
-        const failure = new GatewayError(
-          code === "subscription_sharing_usage_limit_exceeded"
-            ? 429
-            : code === "subscription_sharing_usage_unavailable"
-              ? 503
-              : 502,
-          redact.text(code),
-          "Upstream did not complete normally",
+              : "upstream_failed",
+          );
+        }
+        break; // SDK iterator cleanup cancels the body; completion does not require EOF.
+      } else if (event.type === "error") throw fail(event.code);
+      if (text.length > 2 * 1024 * 1024)
+        throw new GatewayError(
+          502,
+          "response_too_large",
+          "Upstream text exceeds 2 MiB",
         );
-        onFailure(failure);
-        throw failure;
-      }
-      break; // SDK iterator cleanup cancels the body; completion does not require EOF.
-    } else if (event.type === "error")
-      throw new GatewayError(
-        502,
-        "upstream_failed",
-        "Explicit upstream error event",
-      );
-    if (text.length > 2 * 1024 * 1024)
-      throw new GatewayError(
-        502,
-        "response_too_large",
-        "Upstream text exceeds 2 MiB",
-      );
+    }
+  } catch (error) {
+    // Named SSE errors are thrown by the SDK instead of yielded as events.
+    if (error instanceof OpenAI.APIError) throw fail(error.code);
+    throw error;
   }
   if (!terminal)
     throw new GatewayError(
