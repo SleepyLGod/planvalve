@@ -2,6 +2,22 @@
 
 Use your own account on your own machine. The gateway never reads Codex or other agents' credentials. Persistent credentials and the memory-only two-request probe are separate registrations and storage paths; no probe credential import occurs.
 
+## Local profile
+
+For the daily local entry, replace YOUR_MODEL with a model available to your account and authorize once:
+
+```bash
+npm run local -- init --model YOUR_MODEL
+npm run auth -- login --config data/local/gateway.json
+npm run local -- start
+```
+
+On later starts, reuse the saved profile and authorization. Startup never opens a browser or sends a test request. `npm run local -- status` reads only the local client key, not subscription tokens. Inspect authorization with `npm run auth -- status --config data/local/gateway.json`. To revoke it, stop the server first, then run `npm run auth -- logout --config data/local/gateway.json`.
+
+## Custom configuration
+
+Choose the model in your configuration and set a separate `GATEWAY_LOCAL_API_KEY` in the server, client and monitor environments. The variable protects local routes; it is not an upstream token. The local-profile entry handles this key automatically; the low-level commands below require you to supply it.
+
 ```bash
 npm run auth -- login --config gateway.subscription.example.json
 npm run auth -- status --config gateway.subscription.example.json
@@ -9,6 +25,8 @@ npm start -- --config gateway.subscription.example.json
 # Stop the server, then:
 npm run auth -- logout --config gateway.subscription.example.json
 ```
+
+## Storage and session lifecycle
 
 Login prints an official browser URL, starts an IPv4 loopback callback listener, and waits up to 30 minutes. No inference or model discovery is triggered. The callback uses PKCE S256, random state and nonce, one-time consumption, signed ID-token validation against published JWKS, issuer/audience/expiry/nonce checks, verified account identity and granted plan scopes. Returning logins reuse the stable host and issued client ID. One registered identity is supported; a different account cannot silently replace it.
 
