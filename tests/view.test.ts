@@ -173,7 +173,7 @@ test("Chinese table headers and values share display columns with wide glyphs an
       assert.equal(end(header, title!), end(row, value!));
     assert.equal(stringWidth(header), 109);
     assert.equal(stringWidth(row), 109);
-    assert.match(output, /模型网关/);
+    assert.match(output, /PlanValve/);
     assert.match(output, /已连接/);
     assert.match(output, /本次用量/);
     assert.match(output, /运行状态/);
@@ -208,7 +208,7 @@ test("English mode translates both overview and details without changing token a
       color: false,
       lang: "en",
     } as any);
-    assert.match(output, /Model gateway/);
+    assert.match(output, /PlanValve/);
     assert.match(output, /Input/);
     assert.match(output, /Completed/);
     assert.doesNotMatch(output, /[\u3400-\u9fff]/);

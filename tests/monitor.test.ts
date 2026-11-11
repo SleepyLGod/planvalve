@@ -205,7 +205,7 @@ test("status CLI accepts an explicit English locale and rejects unknown locales"
   const url = await gateway.listen();
   const en = await command(["--once", "--lang", "en", "--url", url]);
   assert.equal(en.code, 0, en.stderr);
-  assert.match(en.stdout, /Model gateway/);
+  assert.match(en.stdout, /PlanValve/);
   assert.doesNotMatch(en.stdout, /[\u3400-\u9fff]/);
   const bad = await command(["--lang", "de", "--url", url]);
   assert.notEqual(bad.code, 0);

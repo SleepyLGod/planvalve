@@ -142,7 +142,7 @@ function page(
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   });
   res.end(
-    '<!doctype html><html lang="zh"><meta charset="utf-8"><title>ChatGPT Plan Gateway · 独立测试</title><body style="max-width:720px;margin:60px auto;padding:24px;font:18px/1.7 system-ui"><h1>网关真实小测试</h1>' +
+    '<!doctype html><html lang="zh"><meta charset="utf-8"><title>PlanValve · 独立测试</title><body style="max-width:720px;margin:60px auto;padding:24px;font:18px/1.7 system-ui"><h1>PlanValve 真实请求测试</h1>' +
       message +
       "</body></html>",
   );

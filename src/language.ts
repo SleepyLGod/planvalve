@@ -1,6 +1,5 @@
 export type Language = "zh" | "en";
 const english: Record<string, string> = {
-  模型网关: "Model gateway",
   "官方订阅 · 用户授权": "ChatGPT plan · User authorization",
   "OpenAI API · 用户密钥": "OpenAI API · User key",
   本地预算: "Local budget",

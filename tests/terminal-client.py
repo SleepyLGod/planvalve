@@ -58,7 +58,7 @@ try:
         wait_for('全部历史'.encode())
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 20, 50, 0, 0))
         os.kill(child.pid, signal.SIGWINCH)
-        wait_for('模型网关'.encode())
+        wait_for(b'PlanValve')
     os.write(master, b'q')
     wait_for(b'\x1b[?1049l')
     assert child.wait(timeout=4) == 0

@@ -600,7 +600,7 @@ export async function beginLogin(
       code_challenge_method: "S256",
       code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     });
-    if (!record.client_id) query.set("agent_name_hint", "ChatGPT Plan Gateway");
+    if (!record.client_id) query.set("agent_name_hint", "PlanValve");
     // Do not include ID tokens in URLs printed by the CLI. Returning clients reuse their registration.
     timer = setTimeout(
       () => finish(new Error("Authorization timed out")),

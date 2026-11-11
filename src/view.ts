@@ -291,7 +291,7 @@ export function render(
   };
   line(
     sides(
-      " " + t("模型网关"),
+      " PlanValve",
       t(
         data?.status.mode === "subscription-probe"
           ? "官方订阅 · 真实测试"
