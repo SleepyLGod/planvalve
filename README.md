@@ -69,6 +69,23 @@ Local setup creates private `data/local/gateway.json` and `client.key`. Repeated
 
 ## Monitor and connect
 
+<table>
+  <tr>
+    <th>Dashboard overview</th>
+    <th>Request details</th>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/assets/dashboard-en.png"><img src="docs/assets/dashboard-en.png" alt="PlanValve overview with runtime status, token usage, and a completed request"></a>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/assets/request-detail-en.png"><img src="docs/assets/request-detail-en.png" alt="Completed gpt-6-astra request showing 16 input, 12 output, and 28 total tokens"></a>
+    </td>
+  </tr>
+</table>
+
+*Both views use data from the same live `gpt-6-astra` request through Sign in with ChatGPT. The overview was reconstructed after the gateway stopped.*
+
 With the local service running, use a separate terminal:
 
 ```bash
