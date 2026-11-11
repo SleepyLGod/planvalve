@@ -1,8 +1,8 @@
-# ChatGPT Plan Gateway
+# PlanValve
 
 [English](README.md) · [配置](docs/configuration.md) · [验收记录](docs/offline-verification.md)
 
-在本机把自己的 ChatGPT 订阅或 OpenAI API Key 接成 OpenAI 兼容接口，统一排队、限制发送速率、记录 token，并用中英文终端仪表盘查看状态。
+PlanValve 是一个兼容 OpenAI 接口的本地网关，通过 OpenAI 官方的 [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) 接入你自己的 ChatGPT 订阅，也支持 OpenAI API Key。它负责请求排队、限速和 token 用量统计，并提供中英文终端仪表盘。
 
 普通 OpenAI SDK、LiteLLM 和 HTTP 客户端都能接入。LOTUS／agent-memory 是可选案例，不是网关依赖。
 

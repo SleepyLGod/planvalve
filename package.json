@@ -1,9 +1,9 @@
 {
-  "name": "chatgpt-plan-gateway",
+  "name": "planvalve",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local OpenAI-compatible gateway with ChatGPT-plan OAuth, API-key access, bounded scheduling and usage monitoring",
+  "description": "Local API gateway with OpenAI's official Sign in with ChatGPT, rate limits, and token tracking",
   "engines": {
     "node": ">=26"
   },

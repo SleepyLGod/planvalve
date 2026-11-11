@@ -1,8 +1,8 @@
-# ChatGPT Plan Gateway
+# PlanValve
 
 [简体中文](README.zh-CN.md) · [Configuration](docs/configuration.md) · [Verification](docs/offline-verification.md)
 
-Use your own ChatGPT subscription or OpenAI API key through a local, OpenAI-compatible API. The gateway queues requests, controls send rate, records token usage, and shows it in a Chinese/English terminal dashboard.
+PlanValve is a local, OpenAI-compatible API gateway for your ChatGPT subscription. It uses OpenAI’s official [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) and also supports an OpenAI API key. It queues requests, limits their send rate, and tracks token usage in a bilingual terminal dashboard.
 
 Works with OpenAI SDKs, LiteLLM and ordinary HTTP clients. LOTUS and agent-memory are optional examples.
 
