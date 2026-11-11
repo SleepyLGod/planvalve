@@ -7,6 +7,7 @@ const english: Record<string, string> = {
   账号余额: "Account balance",
   实际费用: "Actual cost",
   暂停原因: "Pause reason",
+  管理用量: "Manage usage",
   configured: "Configured",
   authorized: "Authorized",
   "refresh-required": "Refresh required",

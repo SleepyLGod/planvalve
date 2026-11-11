@@ -3,6 +3,7 @@ import stringWidth from "string-width";
 import type { MonitorData } from "./monitor.ts";
 import type { HistoryRecord, RequestPage } from "./types.ts";
 import { object } from "./compatibility.ts";
+import { chatgptUsageUrl, subscriptionUsageLimitCode } from "./rate-limit.ts";
 export interface ViewState {
   scope: "current" | "all";
   selected: number;
@@ -424,6 +425,11 @@ export function render(
         );
         if (s.pauseReason)
           line(` ${t("暂停原因")} ${safeText(s.pauseReason)}`, "33");
+        if (
+          s.mode === "chatgpt-subscription" &&
+          s.pauseReason === subscriptionUsageLimitCode
+        )
+          line(` ${t("管理用量")}  ${chatgptUsageUrl}`, "33");
       }
       line("");
       line(

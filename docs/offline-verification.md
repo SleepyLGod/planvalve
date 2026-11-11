@@ -1,5 +1,9 @@
 # Offline verification
 
+## GitHub Actions — 2026-11-11
+
+The [merged PlanValve rename](https://github.com/SleepyLGod/planvalve/actions/runs/43037455314) passed type checking, build, and all **119 offline tests** on both Ubuntu and macOS. The workflow makes no real authorization or inference requests.
+
 ## Stream-error feedback fix — 2026-11-07
 
 PR review found a conditional correctness gap, rather than an observed real-account incident. Official Responses supports separate `error` events; whether a particular subscription quota error is actually delivered in that form was not established. A fake slow-cancellation case at concurrency 2 reproduced an extra send even with the 3000 ms interval; ordinary native-fetch loopback controls did not oversend. The review's initial P1 priority was subsequently narrowed to a P2 correctness issue to fix before merge.

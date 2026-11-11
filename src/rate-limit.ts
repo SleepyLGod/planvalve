@@ -1,4 +1,9 @@
 import type { RateDecision } from "./types.ts";
+
+export const subscriptionUsageLimitCode =
+  "subscription_sharing_usage_limit_exceeded";
+export const chatgptUsageUrl = "https://chatgpt.com/settings/usage";
+
 const maximumDelay = 2147483647;
 const buckets = ["requests", "tokens", "project-tokens"];
 const names = [

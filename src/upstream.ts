@@ -1,4 +1,4 @@
-import { rateHeaders } from "./rate-limit.ts";
+import { rateHeaders, subscriptionUsageLimitCode } from "./rate-limit.ts";
 import { trackResponse } from "./transport.ts";
 import { DispatchControl } from "./dispatch.ts";
 import OpenAI from "openai";
@@ -101,7 +101,7 @@ export async function responsesText(
     record.terminalAt ??= new Date().toISOString();
     record.upstreamError = redact.value({ code });
     const failure = new GatewayError(
-      code === "subscription_sharing_usage_limit_exceeded"
+      code === subscriptionUsageLimitCode
         ? 429
         : code === "subscription_sharing_usage_unavailable"
           ? 503

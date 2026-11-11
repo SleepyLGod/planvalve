@@ -1,5 +1,9 @@
 import { trackResponse } from "./transport.ts";
-import { rateDecision } from "./rate-limit.ts";
+import {
+  chatgptUsageUrl,
+  rateDecision,
+  subscriptionUsageLimitCode,
+} from "./rate-limit.ts";
 import { DispatchControl } from "./dispatch.ts";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -690,7 +694,11 @@ export function createGateway(
         error: {
           type: "gateway_error",
           code: e.code,
-          message: e.message,
+          message:
+            mode === "chatgpt-subscription" &&
+            e.code === subscriptionUsageLimitCode
+              ? `ChatGPT usage limit reached. Manage usage at ${chatgptUsageUrl}`
+              : e.message,
           ...(record ? { request_id: record.id } : {}),
         },
       });

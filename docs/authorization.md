@@ -14,6 +14,10 @@ npm run local -- start
 
 On later starts, reuse the saved profile and authorization. Startup never opens a browser or sends a test request. `npm run local -- status` reads only the local client key, not subscription tokens. Inspect authorization with `npm run auth -- status --config data/local/gateway.json`. To revoke it, stop the server first, then run `npm run auth -- logout --config data/local/gateway.json`.
 
+## Manage ChatGPT usage
+
+Use [ChatGPT usage settings](https://chatgpt.com/settings/usage) to check your plan and PlanValve app limits. If the gateway pauses after a subscription usage-limit error, check the applicable limit there before restarting.
+
 ## Custom configuration
 
 Choose the model in your configuration and set a separate `GATEWAY_LOCAL_API_KEY` in the server, client and monitor environments. The variable protects local routes; it is not an upstream token. The local-profile entry handles this key automatically; the low-level commands below require you to supply it.

@@ -128,7 +128,7 @@ npm test
 
 The **119-test offline suite** blocks non-loopback networking; POSIX terminal tests also require Python 3.9+. Optional [LiteLLM](docs/litellm-integration.md) and [LOTUS/SDK](docs/lotus.md) checks use existing Python environments.
 
-Bounded live checks covered subscription text/JSON, usage, restart reuse, renewal, LiteLLM and LOTUS. The latest two-request run observed concurrency **2** with sends **3.003 seconds** apart. API-key serving and limit recovery have offline coverage only. Hosted CI is pending. [Evidence, failures and remaining limits →](docs/offline-verification.md)
+Bounded live checks covered subscription text/JSON, usage, restart reuse, renewal, LiteLLM and LOTUS. The latest two-request run observed concurrency **2** with sends **3.003 seconds** apart. API-key serving and limit recovery have offline coverage only. The offline checks [passed on Ubuntu and macOS](https://github.com/SleepyLGod/planvalve/actions/runs/43037455314). [Evidence, failures and remaining limits →](docs/offline-verification.md)
 
 ## Documentation
 

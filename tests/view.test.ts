@@ -263,6 +263,25 @@ test("real upstream labels, auth, local budget and pause information are transla
     });
     assert.match(zh, /本地预算/);
     assert.match(zh, /账号余额/);
+    assert.doesNotMatch(en, /chatgpt\.com\/settings\/usage/);
+    const subscription = {
+      ...data,
+      status: {
+        ...status,
+        mode: "chatgpt-subscription" as const,
+        upstream: "chatgpt-subscription" as const,
+        pauseReason: "subscription_sharing_usage_limit_exceeded",
+      },
+    };
+    for (const lang of ["en", "zh"] as const) {
+      const output = render(subscription, initialView(), {
+        width: 50,
+        color: false,
+        lang,
+      });
+      assert.ok(output.includes(lang === "en" ? "Manage usage" : "管理用量"));
+      assert.ok(output.includes("https://chatgpt.com/settings/usage"));
+    }
   } finally {
     await gateway.close();
   }

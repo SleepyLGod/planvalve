@@ -689,6 +689,9 @@ test("subscription streaming limit errors retain their specific code and observe
     body: JSON.stringify(request),
   });
   assert.equal(response.status, 429);
+  const body = await response.json();
+  assert.equal(body.error.code, "subscription_sharing_usage_limit_exceeded");
+  assert.match(body.error.message, /https:\/\/chatgpt\.com\/settings\/usage/);
   assert.equal(
     gateway.status().pauseReason,
     "subscription_sharing_usage_limit_exceeded",
