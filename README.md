@@ -67,6 +67,16 @@ The gateway does not save the upstream API key. [Eligible API credits](https://d
 
 Local setup creates private `data/local/gateway.json` and `client.key`. Repeated initialization reuses a matching profile; conflicting settings fail without overwriting it. See [configuration](docs/configuration.md) for changing an existing profile or using custom configs.
 
+### Keep the Mac awake during a run
+
+On macOS, add `--keep-awake` for a run that should continue while the screen is off or locked:
+
+```bash
+npm run local -- start --keep-awake
+```
+
+The flag is off by default. It prevents idle system sleep until the gateway exits. Closing the lid or choosing Sleep can still interrupt a run. For offline mode, use `npm start -- --keep-awake` or append the flag after `--config PATH`.
+
 ## Monitor and connect
 
 <table>

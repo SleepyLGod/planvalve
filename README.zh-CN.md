@@ -67,6 +67,16 @@ npm run local -- start
 
 本机配置和独立访问 Key 位于私有的 `data/local/gateway.json`、`client.key`。重复初始化相同配置会原样复用；冲突时报错，不覆盖。修改已有配置或使用自定义配置，见[配置说明](docs/configuration.md)。
 
+### 锁屏或熄屏时继续运行
+
+在 macOS 上启动时加 `--keep-awake`，就可以锁屏或熄屏继续跑：
+
+```bash
+npm run local -- start --keep-awake
+```
+
+开关默认关闭。它只在网关运行期间阻止系统闲置睡眠，合盖或手动选择「睡眠」仍可能中断任务。离线启动可用 `npm start -- --keep-awake`，也可以把开关加在 `--config PATH` 之后。
+
 ## 监控与客户端
 
 <table>

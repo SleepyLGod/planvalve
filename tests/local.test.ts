@@ -143,6 +143,8 @@ test("local CLI init is project-relative from any cwd and rejects conflicting op
     ["init", "--model", "other-model"],
     ["init", "--model", "x", "--upstream", "invalid"],
     ["start", "--unexpected"],
+    ["start", "--keep-awake", "--keep-awake"],
+    ["status", "--keep-awake"],
     ["status", "--url", "http://127.0.0.1:1"],
     ["status", "--direct"],
   ]) {
@@ -155,6 +157,19 @@ test("local CLI init is project-relative from any cwd and rejects conflicting op
     'process.kill(process.pid,"SIGKILL");\n',
   );
   assert.equal(run(["start"]).status, 137);
+  writeFileSync(
+    resolve(root, "src/cli.ts"),
+    "console.log(JSON.stringify(process.argv.slice(2)));\n",
+  );
+  for (const flags of [[], ["--keep-awake"]]) {
+    const result = run(["start", ...flags]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      "--config",
+      profile.configPath,
+      ...flags,
+    ]);
+  }
 });
 test("local status forwards locale/JSON and its stored local key without opening subscription credentials", async (t) => {
   const root = copiedProject();

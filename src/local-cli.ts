@@ -9,7 +9,7 @@ import {
 } from "./local-profile.ts";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const usage =
-  "Usage: npm run local -- init --model MODEL [--upstream chatgpt-subscription|openai-api-key] | start | status [--lang zh|en] [--once|--json]";
+  "Usage: npm run local -- init --model MODEL [--upstream chatgpt-subscription|openai-api-key] | start [--keep-awake] | status [--lang zh|en] [--once|--json]";
 async function delegate(
   entry: string,
   args: string[],
@@ -81,7 +81,12 @@ async function main(): Promise<void> {
     return;
   }
   if (command !== "start" && command !== "status") throw new Error(usage);
-  if (command === "start" && args.length) throw new Error(usage);
+  if (
+    command === "start" &&
+    args.length &&
+    !(args.length === 1 && args[0] === "--keep-awake")
+  )
+    throw new Error(usage);
   if (command === "status")
     for (let i = 0; i < args.length; i++) {
       if (["--once", "--json"].includes(args[i]!)) continue;
@@ -95,7 +100,7 @@ async function main(): Promise<void> {
   await delegate(
     command === "start" ? "cli.ts" : "status-cli.ts",
     command === "start"
-      ? ["--config", profile.configPath]
+      ? ["--config", profile.configPath, ...args]
       : ["--url", profile.url, ...args],
     profile.localKey,
   );
