@@ -20,7 +20,12 @@ import { summarizeUsage } from "./usage.ts";
 import type { StatusSnapshot } from "./types.ts";
 import { isolatedSDK } from "./sdk.ts";
 import { validateConfig } from "./config.ts";
-import { translate, normalizeUsage, object } from "./compatibility.ts";
+import {
+  translate,
+  normalizeUsage,
+  object,
+  MAX_REQUEST_BYTES,
+} from "./compatibility.ts";
 import { MockTransport, type MockOptions } from "./mock.ts";
 import { Queue } from "./queue.ts";
 import {
@@ -428,7 +433,7 @@ export function createGateway(
       const chunks: Buffer[] = [];
       for await (const chunk of req.iterator({ destroyOnReturn: false })) {
         size += chunk.length;
-        if (size > 1048576)
+        if (size > MAX_REQUEST_BYTES)
           throw new GatewayError(
             413,
             "body_too_large",

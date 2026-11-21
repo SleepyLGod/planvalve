@@ -22,6 +22,8 @@ API Key supports temperature, top_p, max_tokens and max_completion_tokens. Subsc
 
 The client sends the assistant call and its string-content `role: "tool"` result back with the same `tool_call_id`. This is a second, independently queued and metered request; PlanValve does not retain the conversation for it. `response_format` applies to the final text answer, not the tool arguments.
 
+Each assistant tool call requires exactly one result before the next non-tool message or the end of the request. Parallel results can arrive in any order. Before returning a tool turn, Platform checks that the compact request can carry its existing history/options, the assistant turn, and a result envelope plus 1 KiB of encoded content per call within the 1 MiB request limit. Larger tool outputs or additional messages may still exceed that limit.
+
 **ChatGPT subscription:** this gateway translates text/JSON requests to Responses. It rejects these tool messages, tool controls and `reasoning_effort` before dispatch, including in the LOTUS profile. It does not retry them against the Platform API.
 
 Responses reads text deltas and the terminal event, captures usage, and cancels remaining stream reading. Success requires response.completed/status=completed and valid output/usage. Failed/incomplete events, explicit errors, interruption and timeout remain errors. Chat Completions requires one complete text choice (`stop`) or function turn (`tool_calls`), with valid usage in either case. A truncated or refused response is not a successful completion.
