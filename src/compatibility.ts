@@ -15,6 +15,110 @@ function invalid(message: string): never {
 export function object(value: unknown): value is ObjectValue {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function keysOnly(value: ObjectValue, ...keys: string[]): boolean {
+  return Object.keys(value).every((k) => keys.includes(k));
+}
+function namedFunction(
+  value: unknown,
+): value is ObjectValue & { name: string } {
+  return (
+    object(value) &&
+    typeof value.name === "string" &&
+    /^[a-zA-Z0-9_-]{1,64}$/.test(value.name)
+  );
+}
+type FunctionCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+export function functionCalls(value: unknown): value is FunctionCall[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (c) =>
+        object(c) &&
+        keysOnly(c, "id", "type", "function") &&
+        typeof c.id === "string" &&
+        c.id.length > 0 &&
+        c.type === "function" &&
+        namedFunction(c.function) &&
+        keysOnly(c.function, "name", "arguments") &&
+        typeof c.function.arguments === "string",
+    ) &&
+    new Set(value.map((c) => c.id)).size === value.length
+  );
+}
+export interface FunctionTurn {
+  finish_reason: "tool_calls";
+  message: {
+    role: "assistant";
+    content: string | null;
+    tool_calls: FunctionCall[];
+  };
+}
+function functionDefinition(value: unknown): boolean {
+  if (
+    !object(value) ||
+    !keysOnly(value, "type", "function") ||
+    value.type !== "function"
+  )
+    return false;
+  const f = value.function;
+  return (
+    namedFunction(f) &&
+    keysOnly(f, "name", "description", "parameters", "strict") &&
+    (f.description === undefined || typeof f.description === "string") &&
+    (f.parameters === undefined || object(f.parameters)) &&
+    (f.strict == null || typeof f.strict === "boolean")
+  );
+}
+function chatOptions(value: ObjectValue, payload: ObjectValue): void {
+  const { tools, tool_choice: choice, reasoning_effort: effort } = value;
+  if (tools !== undefined) {
+    if (
+      !Array.isArray(tools) ||
+      !tools.length ||
+      !tools.every(functionDefinition)
+    )
+      invalid("Expected function tool definitions");
+    payload.tools = tools;
+  }
+  if (choice !== undefined) {
+    if (object(choice)) {
+      const fn = choice.function;
+      if (
+        !keysOnly(choice, "type", "function") ||
+        choice.type !== "function" ||
+        !namedFunction(fn) ||
+        !keysOnly(fn, "name")
+      )
+        invalid("Unsupported tool_choice");
+      if (
+        !Array.isArray(tools) ||
+        !tools.some((t) => t.function.name === fn.name)
+      )
+        invalid("Named tool_choice must match a declared function");
+    } else if (choice === "required") {
+      if (tools === undefined)
+        invalid("Required tool_choice needs at least one tool");
+    } else if (choice !== "auto" && choice !== "none") {
+      invalid("Unsupported tool_choice");
+    }
+    payload.tool_choice = choice;
+  }
+  if (effort !== undefined) {
+    if (
+      typeof effort !== "string" ||
+      !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+        effort,
+      )
+    )
+      invalid("Invalid reasoning_effort");
+    payload.reasoning_effort = effort;
+  }
+}
 export function translate(
   value: unknown,
   profile: "strict" | "lotus",
@@ -54,7 +158,9 @@ export function translate(
     "max_tokens",
     "max_completion_tokens",
   ]);
-  if (protocol === "chat") for (const key of standard) accepted.add(key);
+  if (protocol === "chat")
+    for (const key of [...standard, "tools", "tool_choice", "reasoning_effort"])
+      accepted.add(key);
   for (const [key, v] of Object.entries(value)) {
     if (accepted.has(key)) continue;
     if (profile === "lotus" && omit.has(key))
@@ -69,6 +175,23 @@ export function translate(
     else invalid(`Unsupported parameter: ${key}`);
   }
   const input = value.messages.map((message) => {
+    if (protocol === "chat" && object(message)) {
+      if (
+        message.role === "assistant" &&
+        functionCalls(message.tool_calls) &&
+        keysOnly(message, "role", "content", "tool_calls") &&
+        (message.content == null || typeof message.content === "string")
+      )
+        return message;
+      if (
+        message.role === "tool" &&
+        keysOnly(message, "role", "tool_call_id", "content") &&
+        typeof message.tool_call_id === "string" &&
+        message.tool_call_id &&
+        typeof message.content === "string"
+      )
+        return message;
+    }
     if (
       !object(message) ||
       !["system", "developer", "user", "assistant"].includes(
@@ -132,6 +255,7 @@ export function translate(
     } else invalid("Unsupported response_format");
   }
   if (protocol === "chat") {
+    chatOptions(value, payload);
     delete payload.text;
     if (value.response_format !== undefined)
       payload.response_format = value.response_format;

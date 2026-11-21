@@ -131,7 +131,7 @@ API-key users can instead run the JavaScript/Python SDK examples with `--direct`
 
 ## Behavior and limits
 
-- **Text and JSON:** text messages, one completion, JSON object/schema validation, non-streaming client responses. No tools, images or embeddings.
+- **Non-streaming completions:** text and validated JSON on both live paths; the Platform API-key path also forwards function tools and explicit `reasoning_effort`. The client executes tools. No images or embeddings.
 - **Explicit protocols:** subscriptions use official Responses; API keys use official Chat Completions. No added agent prompts, project files, implicit history, JSON repair calls or billing fallback. Unsupported parameters fail under the default `strict` policy; the optional LOTUS profile records omissions. See the [protocol](docs/protocol.md).
 - **Bounded dispatch:** configurable concurrency and send spacing; defaults are **1** concurrent task and a **3-second** minimum interval in real modes. Optional smooth RPM cap, per-run request/token budgets, and **zero automatic retries**. Already-sent calls can take observed tokens past a stop threshold.
 - **Upstream feedback:** recognized temporary limits with reliable hints delay unsent work; failed calls are never resent. Quota, balance, permission and unknown failures pause dispatch. Restarting resets local controls, not official limits.

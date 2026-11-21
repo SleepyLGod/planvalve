@@ -7,6 +7,7 @@ import { validateConfig } from "../src/config.ts";
 import { History } from "../src/history.ts";
 import { officialUpstream } from "../src/upstream.ts";
 import { Redactor } from "../src/privacy.ts";
+import { translate } from "../src/compatibility.ts";
 import type { LedgerRecord } from "../src/types.ts";
 test("request records and dispatch callbacks remain isolated under reversed completion", async () => {
   const calls = [0, 0];
@@ -109,6 +110,215 @@ function server(send: typeof fetch, extra = {}) {
     },
   );
 }
+const tool = {
+  type: "function",
+  function: {
+    name: "lookup",
+    description: "private-description",
+    parameters: { type: "object" },
+  },
+};
+const call = {
+  id: "private-call-id",
+  type: "function",
+  function: { name: "lookup", arguments: '{"key":"private-argument"}' },
+};
+const toolMessage = { role: "assistant", content: null, tool_calls: [call] };
+
+test("Platform tool_choice must be satisfiable by the request's declared tools", () => {
+  const named = (name: string) => ({ type: "function", function: { name } });
+  const chat = (options: Record<string, unknown>) =>
+    translate({ ...request, ...options }, "strict", request.model, "chat")
+      .payload;
+  for (const options of [
+    { tool_choice: "required" },
+    { tool_choice: named("lookup") },
+    { tools: [tool], tool_choice: named("other") },
+  ]) {
+    assert.throws(() => chat(options), {
+      status: 400,
+      code: "invalid_request",
+    });
+  }
+  for (const choice of ["required", named("lookup")]) {
+    assert.deepEqual(
+      chat({ tools: [tool], tool_choice: choice }).tool_choice,
+      choice,
+    );
+  }
+});
+
+test("Platform function turn round-trips through dispatch, accounting and private history", async (t) => {
+  const sent: Record<string, unknown>[] = [];
+  const gateway = server(
+    async (_url, init) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return Response.json(
+        sent.length === 1
+          ? {
+              ...result,
+              choices: [
+                { index: 0, message: toolMessage, finish_reason: "tool_calls" },
+              ],
+            }
+          : result,
+      );
+    },
+    { maxRequests: 2 },
+  );
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+  const post = (body: unknown) =>
+    fetch(url + "/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: "Bearer test-local-secret" },
+      body: JSON.stringify(body),
+    });
+  const first = {
+    ...request,
+    reasoning_effort: "none",
+    tools: [tool],
+    tool_choice: { type: "function", function: { name: "lookup" } },
+    response_format: { type: "json_object" },
+  };
+  const reply = await post(first);
+  assert.equal(reply.status, 200);
+  const choice = (await reply.json()).choices[0];
+  assert.deepEqual(choice, {
+    index: 0,
+    message: toolMessage,
+    finish_reason: "tool_calls",
+  });
+  const second = {
+    ...first,
+    tool_choice: "none",
+    messages: [
+      ...request.messages,
+      choice.message,
+      { role: "tool", tool_call_id: call.id, content: "private-tool-result" },
+    ],
+  };
+  const final = await post(second);
+  assert.equal(final.status, 200);
+  assert.deepEqual((await final.json()).choices, result.choices);
+  assert.deepEqual(
+    sent,
+    [first, second].map((body) => ({ ...body, stream: false })),
+  );
+  assert.notEqual((await post(first)).status, 200);
+  assert.equal(sent.length, 2);
+  assert.equal(gateway.report().totals.totalTokens, 2 * raw.total_tokens);
+  const detail = await fetch(
+    url + "/_gateway/requests/" + gateway.records[0]!.id,
+    {
+      headers: { authorization: "Bearer test-local-secret" },
+    },
+  );
+  assert.equal(detail.status, 200);
+  assert.doesNotMatch(
+    (await detail.text()) + JSON.stringify(gateway.report()),
+    /private-(argument|call-id|tool-result|description)/,
+  );
+});
+
+test("invalid Platform tool turns fail without replay and preserve observed usage", async (t) => {
+  const choice = {
+    index: 0,
+    message: toolMessage,
+    finish_reason: "tool_calls",
+  };
+  const named = { type: "function", function: { name: "lookup" } };
+  const other = { ...call, function: { ...call.function, name: "other" } };
+  const otherTurn = {
+    ...result,
+    choices: [{ ...choice, message: { ...toolMessage, tool_calls: [other] } }],
+  };
+  for (const [body, code, options] of [
+    [result, "upstream_incomplete", { tool_choice: "required" }],
+    [result, "upstream_incomplete", { tool_choice: named }],
+    [otherTurn, "upstream_incomplete", {}],
+    [
+      otherTurn,
+      "upstream_incomplete",
+      {
+        tools: [tool, { type: "function", function: { name: "other" } }],
+        tool_choice: named,
+      },
+    ],
+    [
+      { ...result, choices: [choice] },
+      "upstream_incomplete",
+      { tool_choice: "none" },
+    ],
+    [
+      { ...result, choices: [{ ...choice, finish_reason: "length" }] },
+      "upstream_incomplete",
+    ],
+    [
+      {
+        ...result,
+        choices: [
+          {
+            ...choice,
+            message: { ...toolMessage, tool_calls: [{ ...call, id: "" }] },
+          },
+        ],
+      },
+      "upstream_incomplete",
+    ],
+    [{ ...result, choices: [choice], usage: null }, "usage_missing"],
+  ] as const) {
+    let attempts = 0;
+    const gateway = server(async () => {
+      attempts++;
+      return Response.json(body);
+    });
+    t.after(() => gateway.close());
+    const url = await gateway.listen();
+    const r = await fetch(url + "/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: "Bearer test-local-secret" },
+      body: JSON.stringify({ ...request, tools: [tool], ...options }),
+    });
+    assert.equal(r.status, 502);
+    assert.equal((await r.json()).error.code, code);
+    assert.equal(attempts, 1);
+    assert.equal(
+      gateway.records[0]!.usage?.total_tokens,
+      body.usage?.total_tokens,
+    );
+  }
+});
+
+test("Platform-only parameters are never silently accepted by the subscription", () => {
+  for (const extra of [
+    { tools: [tool] },
+    { tool_choice: "auto" },
+    { reasoning_effort: "none" },
+    { messages: [toolMessage] },
+    { messages: [{ role: "tool", tool_call_id: call.id, content: "x" }] },
+  ]) {
+    for (const profile of ["strict", "lotus"] as const)
+      assert.throws(() =>
+        translate(
+          { ...request, ...extra },
+          profile,
+          request.model,
+          "responses",
+        ),
+      );
+  }
+  for (const extra of [
+    { stream: true },
+    { tools: [{ type: "custom", name: "x" }] },
+    { reasoning_effort: 1 },
+    { messages: [{ role: "tool", content: "x" }] },
+  ])
+    assert.throws(() =>
+      translate({ ...request, ...extra }, "strict", request.model, "chat"),
+    );
+});
+
 test("configured HTTP concurrency reaches four while request budget cannot oversend", async (t) => {
   for (const [concurrency, maxRequests] of [
     [1, null],

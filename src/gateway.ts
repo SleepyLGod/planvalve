@@ -554,7 +554,7 @@ export function createGateway(
           }
         };
         try {
-          const text = upstream
+          const completion = upstream
             ? await upstream.complete(
                 translated.payload,
                 signal,
@@ -562,7 +562,8 @@ export function createGateway(
                 onDispatch,
               )
             : await offlineText();
-          translated.validateText(text);
+          if (typeof completion === "string")
+            translated.validateText(completion);
           const decision = rateDecision(
             current.upstreamHttp?.status ?? 200,
             undefined,
@@ -580,8 +581,12 @@ export function createGateway(
             choices: [
               {
                 index: 0,
-                message: { role: "assistant", content: text },
-                finish_reason: "stop",
+                ...(typeof completion === "string"
+                  ? {
+                      message: { role: "assistant", content: completion },
+                      finish_reason: "stop",
+                    }
+                  : completion),
               },
             ],
             usage: current.usage,

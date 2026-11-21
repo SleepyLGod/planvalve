@@ -3,7 +3,12 @@ import { trackResponse } from "./transport.ts";
 import { DispatchControl } from "./dispatch.ts";
 import OpenAI from "openai";
 import { isolatedSDK } from "./sdk.ts";
-import { object, normalizeUsage } from "./compatibility.ts";
+import {
+  object,
+  normalizeUsage,
+  functionCalls,
+  type FunctionTurn,
+} from "./compatibility.ts";
 import { GatewayError, type LedgerRecord, type ObjectValue } from "./types.ts";
 import { Redactor } from "./privacy.ts";
 export interface CredentialSource {
@@ -229,7 +234,7 @@ export function officialUpstream(
       signal: AbortSignal,
       record: LedgerRecord,
       onDispatch: () => void,
-    ): Promise<string> {
+    ): Promise<string | FunctionTurn> {
       const active = record;
       const dispatched = onDispatch;
       let settle = async () => {};
@@ -315,31 +320,80 @@ export function officialUpstream(
             "Absolute upstream deadline exceeded",
           );
         const choice = result.choices?.[0];
+        const selection = payload.tool_choice;
+        const forced =
+          object(selection) && object(selection.function)
+            ? selection.function.name
+            : undefined;
+        let completion: string | FunctionTurn;
         if (
-          result.choices?.length !== 1 ||
-          choice?.finish_reason !== "stop" ||
-          typeof choice.message.content !== "string" ||
-          choice.message.refusal ||
-          choice.message.tool_calls?.length
-        )
+          result.choices?.length === 1 &&
+          choice?.finish_reason === "tool_calls" &&
+          Array.isArray(payload.tools) &&
+          selection !== "none" &&
+          !choice.message?.refusal &&
+          choice.message?.role === "assistant" &&
+          (choice.message.content == null ||
+            typeof choice.message.content === "string") &&
+          functionCalls(choice.message.tool_calls)
+        ) {
+          const offered = new Set(
+            payload.tools.map((tool) => tool.function.name),
+          );
+          if (
+            !choice.message.tool_calls.every(
+              ({ function: fn }) =>
+                offered.has(fn.name) &&
+                (forced === undefined || fn.name === forced),
+            )
+          )
+            throw new GatewayError(
+              502,
+              "upstream_incomplete",
+              "Unexpected function in upstream tool turn",
+            );
+          const message = {
+            role: "assistant" as const,
+            content: choice.message.content ?? null,
+            tool_calls: choice.message.tool_calls,
+          };
+          if (Buffer.byteLength(JSON.stringify(message)) > 2 * 1024 * 1024)
+            throw new GatewayError(
+              502,
+              "response_too_large",
+              "Upstream tool response exceeds 2 MiB",
+            );
+          completion = { finish_reason: "tool_calls", message };
+        } else if (
+          result.choices?.length === 1 &&
+          choice?.finish_reason === "stop" &&
+          selection !== "required" &&
+          forced === undefined &&
+          typeof choice.message?.content === "string" &&
+          !choice.message.refusal &&
+          !choice.message.tool_calls?.length
+        ) {
+          if (choice.message.content.length > 2 * 1024 * 1024)
+            throw new GatewayError(
+              502,
+              "response_too_large",
+              "Upstream text exceeds 2 MiB",
+            );
+          completion = choice.message.content;
+        } else {
           throw new GatewayError(
             502,
             "upstream_incomplete",
-            "Upstream did not return one complete text answer",
+            "Upstream did not return one complete answer or function call turn",
           );
-        if (choice.message.content.length > 2 * 1024 * 1024)
-          throw new GatewayError(
-            502,
-            "response_too_large",
-            "Upstream text exceeds 2 MiB",
-          );
+        }
         if (!record.usage)
           throw new GatewayError(
             502,
             "usage_missing",
             "Core usage missing or invalid",
           );
-        return choice.message.content;
+        return completion;
       } catch (error) {
         if (signal.aborted)
           throw new GatewayError(

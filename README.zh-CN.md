@@ -132,7 +132,7 @@ API Key 用户也可以给普通 JavaScript／Python SDK 示例加 `--direct`，
 
 ## 运行规则
 
-- **文本与 JSON：**文本消息、一条 completion、JSON object／schema 校验、非流式客户端响应。不支持工具、图片或 embeddings。
+- **非流式响应：**两种上游均支持文本及经过校验的 JSON。Platform API Key 路径还可转发函数工具和显式指定的 `reasoning_effort`；工具由客户端执行。不支持图片或 embeddings。
 - **明确的协议转换：**订阅使用官方 Responses，API Key 使用官方 Chat Completions。不增加 agent 提示词、项目文件或隐式历史，不额外调用模型修 JSON，不切换计费。默认 `strict` 拒绝不支持的参数；可选 LOTUS 策略会记录省略。见[协议说明](docs/protocol.md)。
 - **有界发送：**并发和发送间隔可配置，默认并发 **1**、真实模式最短间隔 **3 秒**。可选平滑 RPM 上限、每次运行的请求／token 预算，**自动重试为 0**。在途请求仍可能使最终用量超过 token 停止阈值。
 - **上游反馈：**明确临时限流且有可靠等待提示时，未发送任务等待后继续，失败请求不补发。额度、余额、权限及未知错误暂停派发；重启不恢复官方额度。
