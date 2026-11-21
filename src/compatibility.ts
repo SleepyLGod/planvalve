@@ -1,6 +1,7 @@
 import { Ajv } from "ajv";
 import type { ValidateFunction } from "ajv";
 import { GatewayError, type ObjectValue, type LedgerRecord } from "./types.ts";
+export const MAX_REQUEST_BYTES = 1024 * 1024;
 const ajv = new Ajv({
   strictSchema: true,
   strictTypes: false,
@@ -174,23 +175,31 @@ export function translate(
       });
     else invalid(`Unsupported parameter: ${key}`);
   }
+  const pendingCalls = new Set<string>();
   const input = value.messages.map((message) => {
     if (protocol === "chat" && object(message)) {
+      if (pendingCalls.size && message.role !== "tool")
+        invalid("Missing tool results before the next message");
       if (
         message.role === "assistant" &&
         functionCalls(message.tool_calls) &&
         keysOnly(message, "role", "content", "tool_calls") &&
         (message.content == null || typeof message.content === "string")
-      )
+      ) {
+        for (const call of message.tool_calls) pendingCalls.add(call.id);
         return message;
+      }
       if (
         message.role === "tool" &&
         keysOnly(message, "role", "tool_call_id", "content") &&
         typeof message.tool_call_id === "string" &&
         message.tool_call_id &&
         typeof message.content === "string"
-      )
+      ) {
+        if (!pendingCalls.delete(message.tool_call_id))
+          invalid("Tool result has no matching pending call");
         return message;
+      }
     }
     if (
       !object(message) ||
@@ -209,6 +218,7 @@ export function translate(
       content: message.content,
     };
   });
+  if (pendingCalls.size) invalid("Missing tool results at end of request");
   const payload: ObjectValue =
     protocol === "responses"
       ? { model, input, store: false, stream: true }

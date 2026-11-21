@@ -148,6 +148,84 @@ test("Platform tool_choice must be satisfiable by the request's declared tools",
   }
 });
 
+test("Platform tool results must complete the preceding call turn exactly once", () => {
+  const reply = { role: "tool", tool_call_id: call.id, content: "ok" };
+  const chat = (messages: unknown[]) =>
+    translate({ ...request, messages }, "strict", request.model, "chat");
+  for (const messages of [
+    [reply],
+    [toolMessage],
+    [toolMessage, { ...reply, tool_call_id: "missing" }],
+    [toolMessage, reply, reply],
+    [toolMessage, request.messages[1], reply],
+  ])
+    assert.throws(() => chat(messages), {
+      status: 400,
+      code: "invalid_request",
+    });
+  const parallel = {
+    ...toolMessage,
+    tool_calls: [call, { ...call, id: "another" }],
+  };
+  const messages = [parallel, { ...reply, tool_call_id: "another" }, reply];
+  assert.deepEqual(chat(messages).payload.messages, messages);
+});
+
+test("Platform tool response leaves room for the history and result in a 1 MiB follow-up", async (t) => {
+  const first = { ...request, tools: [tool], stream: false };
+  const turn = (padding: number) => ({
+    ...toolMessage,
+    tool_calls: [
+      {
+        ...call,
+        function: {
+          ...call.function,
+          arguments: JSON.stringify({ value: "x".repeat(padding) }),
+        },
+      },
+    ],
+  });
+  const followup = (padding: number) => ({
+    ...first,
+    messages: [
+      ...request.messages,
+      turn(padding),
+      { role: "tool", tool_call_id: call.id, content: "y".repeat(1024) },
+    ],
+  });
+  let pad = 1024 * 1024 - Buffer.byteLength(JSON.stringify(followup(0)));
+  const gateway = server(async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    return Response.json(
+      body.messages.at(-1).role === "tool"
+        ? result
+        : {
+            ...result,
+            choices: [
+              { index: 0, message: turn(pad), finish_reason: "tool_calls" },
+            ],
+          },
+    );
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+  const post = (body: unknown) =>
+    fetch(url + "/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: "Bearer test-local-secret" },
+      body: JSON.stringify(body),
+    });
+  const response = await post(first);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).choices[0].message, turn(pad));
+  assert.equal((await post(followup(pad))).status, 200);
+  pad++;
+  const tooLarge = await post(first);
+  assert.equal(tooLarge.status, 502);
+  assert.equal((await tooLarge.json()).error.code, "response_too_large");
+  assert.equal(gateway.records.at(-1)?.usage?.total_tokens, raw.total_tokens);
+});
+
 test("Platform function turn round-trips through dispatch, accounting and private history", async (t) => {
   const sent: Record<string, unknown>[] = [];
   const gateway = server(

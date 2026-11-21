@@ -7,6 +7,7 @@ import {
   object,
   normalizeUsage,
   functionCalls,
+  MAX_REQUEST_BYTES,
   type FunctionTurn,
 } from "./compatibility.ts";
 import { GatewayError, type LedgerRecord, type ObjectValue } from "./types.ts";
@@ -357,11 +358,29 @@ export function officialUpstream(
             content: choice.message.content ?? null,
             tool_calls: choice.message.tool_calls,
           };
-          if (Buffer.byteLength(JSON.stringify(message)) > 2 * 1024 * 1024)
+          // Size the compact replay envelope with the actual history and call IDs.
+          // Reserve 1 KiB of encoded result content per call (larger results may still hit 413).
+          const calls = message.tool_calls;
+          const followup = {
+            ...payload,
+            messages: [
+              ...(payload.messages as unknown[]),
+              message,
+              ...calls.map(({ id }) => ({
+                role: "tool",
+                tool_call_id: id,
+                content: "",
+              })),
+            ],
+          };
+          if (
+            Buffer.byteLength(JSON.stringify(followup)) + 1024 * calls.length >
+            MAX_REQUEST_BYTES
+          )
             throw new GatewayError(
               502,
               "response_too_large",
-              "Upstream tool response exceeds 2 MiB",
+              "Tool turn leaves insufficient space for follow-up results",
             );
           completion = { finish_reason: "tool_calls", message };
         } else if (
