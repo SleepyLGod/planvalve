@@ -28,6 +28,10 @@ Each assistant tool call requires exactly one result before the next non-tool me
 
 Responses reads text deltas and the terminal event, captures usage, and cancels remaining stream reading. Success requires response.completed/status=completed and valid output/usage. Failed/incomplete events, explicit errors, interruption and timeout remain errors. Chat Completions requires one complete text choice (`stop`) or function turn (`tool_calls`), with valid usage in either case. A truncated or refused response is not a successful completion.
 
+Both upstreams stream into the gateway. Chat Completions requests receive a separate final usage chunk after the choice finish reason. The gateway assembles one complete response before replying.
+
+Request history includes optional `timing` in milliseconds. Pre-send wait starts when a validated request is recorded. TTFT starts at dispatch and ends at the first nonempty text delta. Estimated TPOT divides the time between first and last text deltas by visible output tokens minus one. Visible tokens are output tokens less reasoning tokens. An estimate requires a completed text-only turn, two or more text deltas and a known positive denominator. Tool turns report first tool arguments separately. Upstream latency ends when the successful finish and usage are observed. Gateway duration ends after cleanup and validation, immediately before the final ledger write. API latency, TTFT and TPOT reflect gateway observations, which include network buffering.
+
 Core input/output/total must be nonnegative integers with consistent sums. Chat Completions usage is preserved raw and normalized for the common ledger. Raw usage and provider diagnostics are redacted before entering the shared in-flight ledger, not only before persistence. Optional cache/reasoning fields remain unknown when absent; they are subsets, not extra total tokens. A failure may still have observed usage. Missing usage stops dispatch rather than creating a misleading zero.
 
 ## Dispatch and failures

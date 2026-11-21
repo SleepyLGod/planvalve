@@ -251,7 +251,7 @@ test("local start forwards signals and the JS local example uses its saved model
   const preload = resolve(root, "fake-upstream.mjs");
   writeFileSync(
     preload,
-    `const original=globalThis.fetch;globalThis.fetch=async(input,init)=>{if(String(input)==='https://api.openai.com/v1/chat/completions')return Response.json({id:'chatcmpl-fake',object:'chat.completion',created:1,model:'test-model',choices:[{index:0,message:{role:'assistant',content:'{"answer":2}'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,prompt_tokens_details:{cached_tokens:1},completion_tokens_details:{reasoning_tokens:1}}});return original(input,init)};`,
+    `import {chatFixture} from '${new URL("./chat-fixture.ts", import.meta.url).href}';const original=globalThis.fetch;globalThis.fetch=async(input,init)=>{if(String(input)==='https://api.openai.com/v1/chat/completions')return chatFixture({id:'chatcmpl-fake',object:'chat.completion',created:1,model:'test-model',choices:[{index:0,message:{role:'assistant',content:'{"answer":2}'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7,prompt_tokens_details:{cached_tokens:1},completion_tokens_details:{reasoning_tokens:1}}});return original(input,init)};`,
   );
   const env = {
     ...guardedEnv(),

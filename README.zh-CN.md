@@ -130,6 +130,8 @@ python3 -B examples/client.py --local
 
 API Key 用户也可以给普通 JavaScript／Python SDK 示例加 `--direct`，并设置 `MODEL`、`OPENAI_API_KEY`。直连会绕过网关的调度、历史和监控；不能同时使用 `--local`。
 
+选中请求并按 Enter，可查看发送时间、发送前等待、TTFT、TPOT 估算、上游总耗时及网关处理耗时。TTFT 以网关收到首段文本为准，TPOT 估算首段之后可见文本的平均输出间隔。API Key 路径读取上游分片，再组装成客户端原有的完整响应。
+
 ## 运行规则
 
 - **非流式响应：**两种上游均支持文本及经过校验的 JSON。Platform API Key 路径还可转发函数工具和显式指定的 `reasoning_effort`；工具由客户端执行。不支持图片或 embeddings。
