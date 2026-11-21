@@ -287,7 +287,7 @@ test("real upstream labels, auth, local budget and pause information are transla
   }
 });
 
-test("request timing is readable in both languages, with wide columns and a legacy fallback", async () => {
+test("request timing is readable in both languages, with adaptive columns and a legacy fallback", async () => {
   const gateway = createGateway({ port: 0, databasePath: ":memory:" });
   try {
     const timed = {
@@ -308,10 +308,15 @@ test("request timing is readable in both languages, with wide columns and a lega
     const state = initialView();
     for (const lang of ["zh", "en"] as const) {
       state.detail = false;
-      const overview = render(data, state, { width: 140, color: false, lang });
-      assert.match(overview, /TTFT/);
-      assert.match(overview, /\.123/);
-      assert(overview.split("\n").every((line) => stringWidth(line) <= 140));
+      for (const width of [99, 100, 119, 140]) {
+        const overview = render(data, state, { width, color: false, lang });
+        assert.equal(overview.includes("TTFT"), width >= 100);
+        assert.equal(overview.includes(".123"), width >= 140);
+        assert.doesNotMatch(overview, /TPOT/);
+        if (width >= 100)
+          assert.match(overview, lang === "zh" ? /240 毫秒/ : /240 ms/);
+        assert(overview.split("\n").every((line) => stringWidth(line) <= width));
+      }
       state.detail = true;
       const detail = render(data, state, { width: 100, color: false, lang });
       assert.match(detail, lang === "zh" ? /网关处理耗时/ : /Gateway duration/);
