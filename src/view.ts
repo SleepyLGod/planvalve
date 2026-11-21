@@ -259,6 +259,9 @@ interface Column {
   width: number;
   right?: boolean;
 }
+const timingWidth = 100;
+const wideTimingWidth = 140;
+
 function columns(width: number, lang: Language): Column[] {
   const { t } = ui(lang);
   const full = width >= 90;
@@ -278,7 +281,7 @@ function columns(width: number, lang: Language): Column[] {
         { label: t("状态"), width: 6 },
         { label: t("总计"), width: 6, right: true },
       ];
-  if (width >= 140)
+  if (width >= wideTimingWidth)
     cols.splice(
       5,
       0,
@@ -286,6 +289,8 @@ function columns(width: number, lang: Language): Column[] {
       { label: "TTFT", width: 10, right: true },
       { label: t("上游耗时"), width: 12, right: true },
     );
+  else if (width >= timingWidth)
+    cols.splice(5, 0, { label: "TTFT", width: 10, right: true });
   const available = Math.max(0, width - 4 - (cols.length - 1) * 2);
   let extra = available - cols.reduce((s, c) => s + c.width, 0),
     i = 0;
@@ -515,7 +520,7 @@ export function render(
                 count(u?.total_tokens),
               ]
             : [r.id.slice(0, 8), stateLabel(r.status), count(u?.total_tokens)];
-        if (width >= 140)
+        if (width >= wideTimingWidth)
           values.splice(
             5,
             0,
@@ -523,6 +528,8 @@ export function render(
             elapsed(r.timing?.ttftMs, t),
             elapsed(r.timing?.upstreamMs, t),
           );
+        else if (width >= timingWidth)
+          values.splice(5, 0, elapsed(r.timing?.ttftMs, t));
         line(
           tableLine(values, cols, i === state.selected),
           i === state.selected ? "1;48;5;24;37" : undefined,
