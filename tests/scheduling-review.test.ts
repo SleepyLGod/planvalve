@@ -1,3 +1,4 @@
+import { chatFixture } from "./chat-fixture.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -582,7 +583,7 @@ test("client cancellation during admission never sends or pauses the sender", as
   const gateway = keyGateway(
     async () => {
       calls++;
-      return Response.json(answer);
+      return chatFixture(answer);
     },
     { minStartIntervalMs: 100 },
   );
@@ -602,7 +603,7 @@ test("client cancellation during admission never sends or pauses the sender", as
 test("rate control overflow is reflected consistently by queue, root reason and ledger", async (t) => {
   t.mock.method(Math, "random", () => 0.5);
   const gateway = keyGateway(async () =>
-    Response.json(answer, {
+    chatFixture(answer, {
       headers: {
         "x-ratelimit-remaining-tokens": "0",
         "x-ratelimit-reset-tokens": "2147483647ms",
@@ -626,7 +627,7 @@ test("latest rate observation follows header arrival rather than request arrival
     async (_url, init) => {
       const n = JSON.parse(String(init?.body)).messages[0].content;
       if (n === "1") await barrier;
-      return Response.json(answer, {
+      return chatFixture(answer, {
         headers: { "x-ratelimit-limit-requests": n },
       });
     },

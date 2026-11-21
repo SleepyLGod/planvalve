@@ -35,6 +35,21 @@ export interface Config {
   reportPath: string;
   databasePath: string;
 }
+export interface RequestTimingMetrics {
+  preSendMs?: number;
+  ttftMs?: number;
+  firstToolArgumentsMs?: number;
+  upstreamMs?: number;
+  gatewayMs: number;
+  tpotMs?: number;
+  tpotUnavailable?:
+    | "request_failed"
+    | "tool_turn"
+    | "no_text"
+    | "single_chunk"
+    | "usage_detail_missing"
+    | "too_few_tokens";
+}
 export interface LedgerRecord {
   id: string;
   sequence: number;
@@ -54,6 +69,9 @@ export interface LedgerRecord {
   dispatchedAt?: string;
   headersAt?: string;
   firstTextAt?: string;
+  lastTextAt?: string;
+  firstToolArgumentsAt?: string;
+  timing?: RequestTimingMetrics;
   terminalAt?: string;
   endReason?: string;
   error?: string;

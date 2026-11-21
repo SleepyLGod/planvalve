@@ -1,5 +1,18 @@
 # Offline verification
 
+## Request timing — 2026-11-22
+
+Type checking, build, and all **132 offline tests** passed locally. The [PR checks](https://github.com/SleepyLGod/planvalve/actions/runs/44926909435) passed on Ubuntu and macOS.
+
+One separately authorized live JSON request ran through each live upstream, with zero retries. Both returned the expected JSON. Input, output, and total token counts matched across the client response, SQLite, and raw upstream usage.
+
+| Upstream             | Model         | Input / output / total |   TTFT | Estimated TPOT |
+| -------------------- | ------------- | ---------------------: | -----: | -------------: |
+| ChatGPT subscription | `gpt-6-luna`  |           26 / 18 / 44 | 3.26 s | 13.49 ms/token |
+| OpenAI API Key       | `gpt-6-astra` |           26 / 17 / 43 | 2.85 s | 29.33 ms/token |
+
+The saved subscription session renewed automatically. The existing local configuration was preserved. These two requests validate the timing and usage paths for short responses. Live rate-limit recovery and sustained load remain unverified.
+
 ## GitHub Actions — 2026-11-11
 
 The [merged PlanValve rename](https://github.com/SleepyLGod/planvalve/actions/runs/43037455314) passed type checking, build, and all **119 offline tests** on both Ubuntu and macOS. The workflow makes no real authorization or inference requests.

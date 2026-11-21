@@ -86,15 +86,15 @@ npm run local -- start --keep-awake
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <a href="docs/assets/dashboard-en.png"><img src="docs/assets/dashboard-en.png" alt="PlanValve 英文看板总览，显示运行状态、用量和一条已完成的请求"></a>
+      <a href="docs/assets/dashboard-en.png"><img src="docs/assets/dashboard-en.png" alt="PlanValve 英文请求列表，显示 Astra 的 TTFT 和 43 个总 token"></a>
     </td>
     <td width="50%" valign="top">
-      <a href="docs/assets/request-detail-en.png"><img src="docs/assets/request-detail-en.png" alt="gpt-6-astra 请求详情，输入 16、输出 12、合计 28 token"></a>
+      <a href="docs/assets/request-detail-en.png"><img src="docs/assets/request-detail-en.png" alt="Astra 英文请求详情，显示估算 TPOT 和 token 用量"></a>
     </td>
   </tr>
 </table>
 
-*两张英文界面图都来自同一条通过 ChatGPT 官方登录发出的真实 `gpt-6-astra` 请求。总览图在网关停止后按记录重绘。*
+*两张截图回放的是同一条通过 OpenAI API Key 通道发出的真实 `gpt-6-astra` 请求。*
 
 网关运行后，在另一个终端执行：
 
@@ -130,6 +130,8 @@ python3 -B examples/client.py --local
 
 API Key 用户也可以给普通 JavaScript／Python SDK 示例加 `--direct`，并设置 `MODEL`、`OPENAI_API_KEY`。直连会绕过网关的调度、历史和监控；不能同时使用 `--local`。
 
+终端够宽时，请求列表直接显示 TTFT。选中请求并按 Enter，可查看完整计时，包括估算 TPOT。TTFT 是网关发出请求到收到首段文本的时间，TPOT 估算首段之后可见文本的平均输出间隔。
+
 ## 运行规则
 
 - **非流式响应：**两种上游均支持文本及经过校验的 JSON。Platform API Key 路径还可转发函数工具和显式指定的 `reasoning_effort`；工具由客户端执行。不支持图片或 embeddings。
@@ -154,9 +156,9 @@ npm run build
 npm test
 ```
 
-**119 项离线测试**拦截非 loopback 网络；POSIX 终端测试另需 Python 3.9+。可选 [LiteLLM](docs/litellm-integration.md) 和 [LOTUS／SDK](docs/lotus.zh-CN.md) 验收复用已有 Python 环境。
+离线测试拦截非 loopback 网络；POSIX 终端测试另需 Python 3.9+。可选 [LiteLLM](docs/litellm-integration.md) 和 [LOTUS／SDK](docs/lotus.zh-CN.md) 验收复用已有 Python 环境。
 
-已完成的小规模真实验证覆盖订阅文本／JSON、usage、重启复用、续期、LiteLLM 和 LOTUS。最新两请求实测在途 **2**、发送间隔 **3.003 秒**。API Key 通道及限流恢复只有离线验收。离线检查已在 [Ubuntu 和 macOS 上通过](https://github.com/SleepyLGod/planvalve/actions/runs/43037455314)。[证据、失败与限制 →](docs/offline-verification.md)
+小规模实测覆盖订阅文本／JSON、token 用量、重启复用、续期、LiteLLM 和 LOTUS。一次两请求订阅实测观察到在途 **2**、发送间隔 **3.003 秒**。计时功能在订阅和 API Key 通道各通过一条真实 JSON 请求，两条都有完整 token 用量和计时。限流恢复仅做过离线验证。离线检查已在 [Ubuntu 和 macOS 上通过](https://github.com/SleepyLGod/planvalve/actions/runs/44926909435)。[证据、失败与限制 →](docs/offline-verification.md)
 
 ## 文档
 

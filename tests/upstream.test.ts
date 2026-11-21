@@ -1,3 +1,4 @@
+import { chatFixture } from "./chat-fixture.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import OpenAI from "openai";
@@ -29,7 +30,7 @@ test("request records and dispatch callbacks remain isolated under reversed comp
     async (_url, init) => {
       const n = Number(JSON.parse(String(init?.body)).messages[0].content);
       await new Promise((resolve) => setTimeout(resolve, n === 0 ? 40 : 1));
-      return Response.json(
+      return chatFixture(
         {
           ...result,
           usage: { ...raw, prompt_tokens: 58 + n, total_tokens: 71 + n },
@@ -196,7 +197,7 @@ test("Platform tool response leaves room for the history and result in a 1 MiB f
   let pad = 1024 * 1024 - Buffer.byteLength(JSON.stringify(followup(0)));
   const gateway = server(async (_url, init) => {
     const body = JSON.parse(String(init?.body));
-    return Response.json(
+    return chatFixture(
       body.messages.at(-1).role === "tool"
         ? result
         : {
@@ -231,7 +232,7 @@ test("Platform function turn round-trips through dispatch, accounting and privat
   const gateway = server(
     async (_url, init) => {
       sent.push(JSON.parse(String(init?.body)));
-      return Response.json(
+      return chatFixture(
         sent.length === 1
           ? {
               ...result,
@@ -281,7 +282,11 @@ test("Platform function turn round-trips through dispatch, accounting and privat
   assert.deepEqual((await final.json()).choices, result.choices);
   assert.deepEqual(
     sent,
-    [first, second].map((body) => ({ ...body, stream: false })),
+    [first, second].map((body) => ({
+      ...body,
+      stream: true,
+      stream_options: { include_usage: true },
+    })),
   );
   assert.notEqual((await post(first)).status, 200);
   assert.equal(sent.length, 2);
@@ -349,7 +354,7 @@ test("invalid Platform tool turns fail without replay and preserve observed usag
     let attempts = 0;
     const gateway = server(async () => {
       attempts++;
-      return Response.json(body);
+      return chatFixture(body);
     });
     t.after(() => gateway.close());
     const url = await gateway.listen();
@@ -424,7 +429,7 @@ test("configured HTTP concurrency reaches four while request budget cannot overs
         await firstWave;
         await new Promise((resolve) => setTimeout(resolve, 3));
         active--;
-        return Response.json(result);
+        return chatFixture(result);
       },
       { concurrency, maxRequests },
     );
@@ -461,7 +466,7 @@ test("temporary rate failure is not retried and a later independent request cont
             },
           },
         )
-      : Response.json(result);
+      : chatFixture(result);
   });
   t.after(() => gateway.close());
   const url = await gateway.listen();
@@ -494,7 +499,7 @@ test("a hard pause preserves other in-flight results and cannot be cleared by th
           { status: 429, headers: { "retry-after": "0" } },
         );
       await new Promise((resolve) => setTimeout(resolve, 10));
-      return Response.json(result);
+      return chatFixture(result);
     },
     { concurrency: 4 },
   );
@@ -529,7 +534,7 @@ test("unsent cooldown deadline ends only that request and retains recoverable se
             { error: { code: "rate_limit_exceeded" } },
             { status: 429, headers: { "retry-after": "1" } },
           )
-        : Response.json(result);
+        : chatFixture(result);
     },
     { upstreamTimeoutMs: 20 },
   );
@@ -625,7 +630,7 @@ test("history marks an in-flight inference as dispatched before completion", asy
   const gateway = server(async () => {
     enter();
     await gate;
-    return Response.json(result);
+    return chatFixture(result);
   });
   t.after(() => gateway.close());
   const url = await gateway.listen();
@@ -675,7 +680,7 @@ test("failure to persist the dispatch transition stops the send and pauses", asy
   let calls = 0;
   const gateway = server(async () => {
     calls++;
-    return Response.json(result);
+    return chatFixture(result);
   });
   t.after(() => gateway.close());
   const url = await gateway.listen();
@@ -713,7 +718,7 @@ test("official JS client works with API-key gateway, preserves standard paramete
       "Bearer test-upstream-secret",
     );
     received = JSON.parse(String(init!.body));
-    return Response.json(result, { headers: { "x-request-id": "req-test" } });
+    return chatFixture(result, { headers: { "x-request-id": "req-test" } });
   });
   t.after(() => gateway.close());
   const url = await gateway.listen();
@@ -768,7 +773,7 @@ test("real-mode model and status routes require local key, reject cross-origin a
   let calls = 0;
   const gateway = server(async () => {
     calls++;
-    return Response.json(result);
+    return chatFixture(result);
   });
   t.after(() => gateway.close());
   const url = await gateway.listen();
@@ -856,7 +861,7 @@ test("API key incomplete output and missing usage fail explicitly without resend
     let calls = 0;
     const gateway = server(async () => {
       calls++;
-      return Response.json(response);
+      return chatFixture(response);
     });
     t.after(() => gateway.close());
     const url = await gateway.listen();
@@ -1107,7 +1112,7 @@ test("64 API-key requests keep one upstream in flight through the same FIFO", as
       max = Math.max(max, active);
       await new Promise((resolve) => setTimeout(resolve, 2));
       active--;
-      return Response.json(result);
+      return chatFixture(result);
     },
     { queueCapacity: 64, maxQueueWaitMs: 10000 },
   );

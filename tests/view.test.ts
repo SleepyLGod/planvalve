@@ -286,3 +286,50 @@ test("real upstream labels, auth, local budget and pause information are transla
     await gateway.close();
   }
 });
+
+test("request timing is readable in both languages, with adaptive columns and a legacy fallback", async () => {
+  const gateway = createGateway({ port: 0, databasePath: ":memory:" });
+  try {
+    const timed = {
+      ...request,
+      dispatchedAt: "2026-11-06T00:00:00.123Z",
+      timing: {
+        gatewayMs: 600,
+        preSendMs: 40,
+        ttftMs: 240,
+        upstreamMs: 510,
+        tpotMs: 12.5,
+      },
+    };
+    const data = {
+      status: gateway.status(),
+      page: { items: [timed, request], nextCursor: null },
+    };
+    const state = initialView();
+    for (const lang of ["zh", "en"] as const) {
+      state.detail = false;
+      for (const width of [99, 100, 119, 140]) {
+        const overview = render(data, state, { width, color: false, lang });
+        assert.equal(overview.includes("TTFT"), width >= 100);
+        assert.equal(overview.includes(".123"), width >= 140);
+        assert.doesNotMatch(overview, /TPOT/);
+        if (width >= 100)
+          assert.match(overview, lang === "zh" ? /240 毫秒/ : /240 ms/);
+        assert(overview.split("\n").every((line) => stringWidth(line) <= width));
+      }
+      state.detail = true;
+      const detail = render(data, state, { width: 100, color: false, lang });
+      assert.match(detail, lang === "zh" ? /网关处理耗时/ : /Gateway duration/);
+      assert.match(
+        detail,
+        lang === "zh" ? /12\.50 毫秒\/token/ : /12\.50 ms\/token/,
+      );
+      state.selected = 1;
+      const legacy = render(data, state, { width: 100, color: false, lang });
+      assert.match(legacy, lang === "zh" ? /TTFT\s+未知/ : /TTFT\s+Unknown/);
+      state.selected = 0;
+    }
+  } finally {
+    await gateway.close();
+  }
+});
