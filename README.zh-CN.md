@@ -130,7 +130,7 @@ python3 -B examples/client.py --local
 
 API Key 用户也可以给普通 JavaScript／Python SDK 示例加 `--direct`，并设置 `MODEL`、`OPENAI_API_KEY`。直连会绕过网关的调度、历史和监控；不能同时使用 `--local`。
 
-选中请求并按 Enter，可查看发送时间、发送前等待、TTFT、TPOT 估算、上游总耗时及网关处理耗时。TTFT 以网关收到首段文本为准，TPOT 估算首段之后可见文本的平均输出间隔。API Key 路径读取上游分片，再组装成客户端原有的完整响应。
+终端够宽时，请求列表直接显示 TTFT。选中请求并按 Enter，可查看完整计时，包括估算 TPOT。TTFT 是网关发出请求到收到首段文本的时间，TPOT 估算首段之后可见文本的平均输出间隔。
 
 ## 运行规则
 
@@ -156,9 +156,9 @@ npm run build
 npm test
 ```
 
-**119 项离线测试**拦截非 loopback 网络；POSIX 终端测试另需 Python 3.9+。可选 [LiteLLM](docs/litellm-integration.md) 和 [LOTUS／SDK](docs/lotus.zh-CN.md) 验收复用已有 Python 环境。
+离线测试拦截非 loopback 网络；POSIX 终端测试另需 Python 3.9+。可选 [LiteLLM](docs/litellm-integration.md) 和 [LOTUS／SDK](docs/lotus.zh-CN.md) 验收复用已有 Python 环境。
 
-已完成的小规模真实验证覆盖订阅文本／JSON、usage、重启复用、续期、LiteLLM 和 LOTUS。最新两请求实测在途 **2**、发送间隔 **3.003 秒**。API Key 通道及限流恢复只有离线验收。离线检查已在 [Ubuntu 和 macOS 上通过](https://github.com/SleepyLGod/planvalve/actions/runs/43037455314)。[证据、失败与限制 →](docs/offline-verification.md)
+小规模实测覆盖订阅文本／JSON、token 用量、重启复用、续期、LiteLLM 和 LOTUS。一次两请求订阅实测观察到在途 **2**、发送间隔 **3.003 秒**。计时功能在订阅和 API Key 通道各通过一条真实 JSON 请求，两条都有完整 token 用量和计时。限流恢复仅做过离线验证。离线检查已在 [Ubuntu 和 macOS 上通过](https://github.com/SleepyLGod/planvalve/actions/runs/44926909435)。[证据、失败与限制 →](docs/offline-verification.md)
 
 ## 文档
 
