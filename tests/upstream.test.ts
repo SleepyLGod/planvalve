@@ -407,11 +407,21 @@ test("configured HTTP concurrency reaches four while request budget cannot overs
     let active = 0,
       peak = 0,
       calls = 0;
+    const expectedPeak = Math.min(concurrency, maxRequests ?? concurrency);
+    let release!: () => void;
+    const firstWave = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Hold the first wave until it fills; don't assume CI can start four requests in 3 ms.
+    const deadline = setTimeout(release, 10_000);
+    t.after(() => clearTimeout(deadline));
     const gateway = server(
       async () => {
         calls++;
         active++;
         peak = Math.max(peak, active);
+        if (active === expectedPeak) release();
+        await firstWave;
         await new Promise((resolve) => setTimeout(resolve, 3));
         active--;
         return Response.json(result);
@@ -431,7 +441,7 @@ test("configured HTTP concurrency reaches four while request budget cannot overs
     );
     await Promise.all(responses.map((r) => r.json()));
     assert.equal(calls, maxRequests === null ? 64 : 1);
-    assert.equal(peak, maxRequests === null ? concurrency : 1);
+    assert.equal(peak, expectedPeak);
   }
 });
 test("temporary rate failure is not retried and a later independent request continues after cooldown", async (t) => {
