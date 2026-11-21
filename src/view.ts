@@ -48,11 +48,14 @@ export function cell(
   const padding = " ".repeat(Math.max(0, width - stringWidth(text)));
   return align === "right" ? padding + text : text + padding;
 }
-function clock(value: string, full = false): string {
+function clock(value: string, full = false, milliseconds = false): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   const pad = (n: number) => String(n).padStart(2, "0");
-  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  const fraction = milliseconds
+    ? "." + String(date.getMilliseconds()).padStart(3, "0")
+    : "";
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${fraction}`;
   return full
     ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
     : time;
@@ -62,8 +65,13 @@ function sides(left: unknown, right: unknown, width: number): string {
   return cell(left, Math.max(0, width - stringWidth(r) - 1)) + " " + r;
 }
 
-function pair(label: string, value: unknown, width: number): string {
-  const labelWidth = Math.min(12, Math.floor(width / 2));
+function pair(
+  label: string,
+  value: unknown,
+  width: number,
+  maxLabelWidth = 12,
+): string {
+  const labelWidth = Math.min(maxLabelWidth, Math.floor(width / 2));
   return (
     cell(label, labelWidth) +
     cell(value, Math.max(0, width - labelWidth), "right")
@@ -95,6 +103,12 @@ function wrapped(lines: string[], width: number): string[] {
     output.push(text);
   }
   return output;
+}
+function elapsed(ms: number | undefined, t: (value: string) => string): string {
+  if (ms === undefined) return t("未知");
+  return ms < 1000
+    ? `${Math.round(ms)} ${t("毫秒")}`
+    : `${(ms / 1000).toFixed(2)} ${t("秒")}`;
 }
 function detailLines(
   r: HistoryRecord,
@@ -136,15 +150,6 @@ function detailLines(
     ),
     pair(t("接收时间"), clock(r.receivedAt, true), w),
     pair(
-      t("发送上游"),
-      r.inferenceDispatched === false
-        ? t("未发送")
-        : r.dispatchedAt
-          ? clock(r.dispatchedAt, true)
-          : t("未知"),
-      w,
-    ),
-    pair(
       t("等待耗时"),
       duration(r.receivedAt, r.startedAt ?? r.finishedAt ?? now),
       w,
@@ -153,11 +158,6 @@ function detailLines(
     pair(
       t("响应头"),
       r.headersAt ? duration(r.startedAt, r.headersAt) : t("未知"),
-      w,
-    ),
-    pair(
-      t("首个文本"),
-      r.firstTextAt ? duration(r.startedAt, r.firstTextAt) : t("未知"),
       w,
     ),
     pair(
@@ -183,8 +183,33 @@ function detailLines(
     pair(t("推理"), count(reasoning), w),
     pair(t("写入缓存"), count(writes), w),
   ];
+  const timing = r.timing;
+  const sentAt = r.dispatchedAt
+    ? clock(r.dispatchedAt, true, true)
+    : t(r.inferenceDispatched === false ? "未发送" : "未知");
+  const timingRow = (label: string, value: string) =>
+    pair(t(label), value, w, 23);
+  const timingRows = [
+    timingRow("发送时间", sentAt),
+    timingRow("发送前等待", elapsed(timing?.preSendMs, t)),
+    timingRow("TTFT", elapsed(timing?.ttftMs, t)),
+    timingRow(
+      "TPOT（估算）",
+      timing?.tpotMs === undefined
+        ? t("未知")
+        : `${timing.tpotMs.toFixed(2)} ${t("毫秒")}/token`,
+    ),
+    timingRow("上游总耗时", elapsed(timing?.upstreamMs, t)),
+    timingRow("网关处理耗时", elapsed(timing?.gatewayMs, t)),
+  ];
+  if (timing?.firstToolArgumentsMs !== undefined)
+    timingRows.push(
+      timingRow("首个工具参数", elapsed(timing.firstToolArgumentsMs, t)),
+    );
   const lines = [
     " " + t("请求详情"),
+    ...panel(t("请求耗时"), timingRows, width),
+    "",
     ...panel(t("用量明细 · 词元"), usage, width),
     "",
     ...panel(t("请求信息 · 本机时间"), info, width),
@@ -253,6 +278,14 @@ function columns(width: number, lang: Language): Column[] {
         { label: t("状态"), width: 6 },
         { label: t("总计"), width: 6, right: true },
       ];
+  if (width >= 140)
+    cols.splice(
+      5,
+      0,
+      { label: t("发送时间"), width: 12 },
+      { label: "TTFT", width: 10, right: true },
+      { label: t("上游耗时"), width: 12, right: true },
+    );
   const available = Math.max(0, width - 4 - (cols.length - 1) * 2);
   let extra = available - cols.reduce((s, c) => s + c.width, 0),
     i = 0;
@@ -482,6 +515,14 @@ export function render(
                 count(u?.total_tokens),
               ]
             : [r.id.slice(0, 8), stateLabel(r.status), count(u?.total_tokens)];
+        if (width >= 140)
+          values.splice(
+            5,
+            0,
+            r.dispatchedAt ? clock(r.dispatchedAt, false, true) : t("未知"),
+            elapsed(r.timing?.ttftMs, t),
+            elapsed(r.timing?.upstreamMs, t),
+          );
         line(
           tableLine(values, cols, i === state.selected),
           i === state.selected ? "1;48;5;24;37" : undefined,

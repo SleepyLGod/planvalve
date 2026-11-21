@@ -1,3 +1,4 @@
+import { chatFixture } from "./chat-fixture.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
@@ -77,9 +78,8 @@ test("read-only status reports real queue state without consuming attempts", asy
           started();
           await gate;
         }
-        return Response.json({
+        return chatFixture({
           id: "chatcmpl-test",
-          object: "chat.completion",
           model: "offline-model",
           created: 1,
           choices: [

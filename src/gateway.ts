@@ -27,6 +27,7 @@ import {
   MAX_REQUEST_BYTES,
 } from "./compatibility.ts";
 import { MockTransport, type MockOptions } from "./mock.ts";
+import { RequestTiming } from "./timing.ts";
 import { Queue } from "./queue.ts";
 import {
   GatewayError,
@@ -422,6 +423,7 @@ export function createGateway(
       if (!res.writableFinished) abort.abort();
     });
     let record: LedgerRecord | undefined;
+    let timing: RequestTiming | undefined;
     try {
       if (storageError)
         throw new GatewayError(
@@ -457,6 +459,8 @@ export function createGateway(
         model,
         config.upstream === "openai-api-key" ? "chat" : "responses",
       );
+      const requestTiming = new RequestTiming();
+      timing = requestTiming;
       record = {
         id: randomUUID(),
         sequence: records.length + 1,
@@ -535,6 +539,7 @@ export function createGateway(
                     current.dispatchedAt = undefined;
                     throw error;
                   }
+                  requestTiming.sent(current);
                   return (probe?.fetch ?? mock.fetch)(input, init);
                 },
               );
@@ -553,6 +558,7 @@ export function createGateway(
               current,
               redact,
               (failure) => observeUpstream(current, failure),
+              requestTiming,
             );
           } finally {
             await settle();
@@ -565,6 +571,7 @@ export function createGateway(
                 signal,
                 current,
                 onDispatch,
+                requestTiming,
               )
             : await offlineText();
           if (typeof completion === "string")
@@ -657,6 +664,7 @@ export function createGateway(
         } finally {
           abort.signal.removeEventListener("abort", cancelAdmission);
           current.finishedAt = new Date().toISOString();
+          requestTiming.finish(current);
           persist(current);
         }
       }, abort.signal);
@@ -670,6 +678,7 @@ export function createGateway(
       if (record) {
         record.error = e.code;
         record.finishedAt ??= new Date().toISOString();
+        if (!record.timing) timing?.finish(record);
         if (record.status === "queued")
           record.status =
             e.code === "cancelled"
@@ -693,7 +702,14 @@ export function createGateway(
       }
       if (storageError && record) {
         record.error = "storage_unavailable";
-        if (record.status === "completed") record.status = "unknown";
+        if (record.status === "completed") {
+          record.status = "unknown";
+          if (record.timing) {
+            delete record.timing.upstreamMs;
+            delete record.timing.tpotMs;
+            record.timing.tpotUnavailable = "request_failed";
+          }
+        }
       }
       if (
         record?.upstreamHttp?.retryAfter &&

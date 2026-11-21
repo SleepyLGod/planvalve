@@ -129,6 +129,8 @@ Supported route: `POST /v1/chat/completions`. `GET /v1/models` lists the configu
 
 API-key users can instead run the JavaScript/Python SDK examples with `--direct`, `MODEL` and `OPENAI_API_KEY`. Direct calls bypass the gateway's scheduling, history and dashboard. `--local` and `--direct` cannot be combined.
 
+Select a request and press Enter for send time, pre-send wait, TTFT, estimated TPOT, upstream latency and gateway duration. TTFT measures the first text received by the gateway. TPOT estimates the average visible-output interval after that first text. The API Key path now reads upstream chunks and assembles the same complete client response.
+
 ## Behavior and limits
 
 - **Non-streaming completions:** text and validated JSON on both live paths; the Platform API-key path also forwards function tools and explicit `reasoning_effort`. The client executes tools. No images or embeddings.

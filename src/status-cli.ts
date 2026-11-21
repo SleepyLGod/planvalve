@@ -31,7 +31,7 @@ async function main(): Promise<void> {
       options.json
         ? JSON.stringify(data, null, 2) + "\n"
         : render(data, initialView(), {
-            width: 110,
+            width: 140,
             color: false,
             lang: options.lang,
           }) + "\n",

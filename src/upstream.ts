@@ -11,6 +11,8 @@ import {
   type FunctionTurn,
 } from "./compatibility.ts";
 import { GatewayError, type LedgerRecord, type ObjectValue } from "./types.ts";
+import { collectChat } from "./chat-stream.ts";
+import type { RequestTiming } from "./timing.ts";
 import { Redactor } from "./privacy.ts";
 export interface CredentialSource {
   accessToken(signal?: AbortSignal): Promise<string>;
@@ -98,6 +100,7 @@ export async function responsesText(
   record: LedgerRecord,
   redact: Redactor,
   onFailure: (error: GatewayError) => void = () => {},
+  timing?: RequestTiming,
 ): Promise<string> {
   const fail = (rawCode: unknown, fallback = "upstream_failed") => {
     const code =
@@ -136,7 +139,7 @@ export async function responsesText(
           "Absolute upstream deadline exceeded",
         );
       if (event.type === "response.output_text.delta") {
-        record.firstTextAt ??= new Date().toISOString();
+        if (event.delta) timing?.text();
         text += event.delta;
       } else if (
         event.type === "response.refusal.delta" ||
@@ -170,6 +173,7 @@ export async function responsesText(
               : "upstream_failed",
           );
         }
+        if (record.usage) timing?.completedUpstream();
         break; // SDK iterator cleanup cancels the body; completion does not require EOF.
       } else if (event.type === "error") throw fail(event.code);
       if (text.length > 2 * 1024 * 1024)
@@ -235,6 +239,7 @@ export function officialUpstream(
       signal: AbortSignal,
       record: LedgerRecord,
       onDispatch: () => void,
+      timing?: RequestTiming,
     ): Promise<string | FunctionTurn> {
       const active = record;
       const dispatched = onDispatch;
@@ -284,6 +289,7 @@ export function officialUpstream(
               }
               throw error;
             }
+            if (active) timing?.sent(active);
             const response = send("https://api.openai.com/v1" + path, {
               ...init,
               headers,
@@ -307,20 +313,32 @@ export function officialUpstream(
             record,
             redact,
             (failure) => observe(record, failure),
+            timing,
           );
-        const result = await client.chat.completions.create(
-          payload as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
+        const stream = await client.chat.completions.create(
+          {
+            ...payload,
+            stream: true,
+            stream_options: { include_usage: true },
+          } as unknown as OpenAI.ChatCompletionCreateParamsStreaming,
           { signal },
         );
+        const choice = await collectChat(
+          stream,
+          signal,
+          (usage) => {
+            timing?.completedUpstream();
+            captureUsage(record, usage, redact, true);
+          },
+          timing,
+        );
         record.terminalAt = new Date().toISOString();
-        captureUsage(record, result.usage, redact, true);
         if (signal.aborted)
           throw new GatewayError(
             502,
             "upstream_timeout",
             "Absolute upstream deadline exceeded",
           );
-        const choice = result.choices?.[0];
         const selection = payload.tool_choice;
         const forced =
           object(selection) && object(selection.function)
@@ -328,7 +346,6 @@ export function officialUpstream(
             : undefined;
         let completion: string | FunctionTurn;
         if (
-          result.choices?.length === 1 &&
           choice?.finish_reason === "tool_calls" &&
           Array.isArray(payload.tools) &&
           selection !== "none" &&
@@ -382,9 +399,9 @@ export function officialUpstream(
               "response_too_large",
               "Tool turn leaves insufficient space for follow-up results",
             );
+          timing?.markToolTurn();
           completion = { finish_reason: "tool_calls", message };
         } else if (
-          result.choices?.length === 1 &&
           choice?.finish_reason === "stop" &&
           selection !== "required" &&
           forced === undefined &&
@@ -438,13 +455,15 @@ export function officialUpstream(
               ? error.code
               : "upstream_http_error";
           record.upstreamError = redact.value({ code }); // Never expose provider diagnostics or reflected secrets.
-          throw new GatewayError(
+          const failure = new GatewayError(
             error.status && error.status >= 400 && error.status <= 599
               ? error.status
               : 502,
             redact.text(code),
             "Upstream rejected the request",
           );
+          observe(record, failure);
+          throw failure;
         }
         throw error;
       } finally {
