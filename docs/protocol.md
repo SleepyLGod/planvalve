@@ -1,6 +1,6 @@
 # Protocol and API
 
-Client → validate → FIFO queue → explicit upstream → completed text/JSON + server usage → SQLite persistence → Chat Completions response.
+Client → validate → FIFO queue → explicit upstream → completion + server usage → SQLite persistence → Chat Completions response.
 
 ## Upstreams
 
@@ -14,11 +14,17 @@ SDK constructors cannot inherit host credential defaults; requests use explicit 
 
 `GET /healthz`, `GET /v1/models`, `POST /v1/chat/completions`.
 
-Accept a single configured model, nonempty string-content system/developer/user/assistant messages, n omitted or 1, and stream omitted or false. Output formats: text, json_object, json_schema. Validate JSON/schema locally without repair requests. Tools, images, streaming clients and unknown parameters are rejected. The model list is configured state, not an upstream eligibility result.
+Accept a single configured model, a nonempty message list, n omitted or 1, and stream omitted or false. Ordinary system/developer/user/assistant messages have string content. Output formats: text, json_object, json_schema. Validate final JSON/schema locally without repair requests. Images, streaming clients and unknown parameters are rejected. The model list is configured state, not an upstream eligibility result.
 
 API Key supports temperature, top_p, max_tokens and max_completion_tokens. Subscription strict rejects unsupported parameters; the optional LOTUS profile records explicit omissions, not enforced settings. Supported fields have the same meaning regardless of client library.
 
-Responses reads text deltas and the terminal event, captures usage, and cancels remaining stream reading. Success requires response.completed/status=completed and valid output/usage. Failed/incomplete events, explicit errors, interruption and timeout remain errors. Chat Completions requires one text choice with finish_reason=stop and valid usage. A truncated or refused response is not a successful completion.
+**Platform API key only: function calls.** PlanValve forwards `tools`, `tool_choice` (auto, none, required, or a named function) and an explicit `reasoning_effort`. Returned function calls must be declared for this request and respect its tool choice: `none` disallows a call, `required` requires a call, and a named choice requires that function. The gateway never executes tools. The client must validate arguments and check permissions before execution.
+
+The client sends the assistant call and its string-content `role: "tool"` result back with the same `tool_call_id`. This is a second, independently queued and metered request; PlanValve does not retain the conversation for it. `response_format` applies to the final text answer, not the tool arguments.
+
+**ChatGPT subscription:** this gateway translates text/JSON requests to Responses. It rejects these tool messages, tool controls and `reasoning_effort` before dispatch, including in the LOTUS profile. It does not retry them against the Platform API.
+
+Responses reads text deltas and the terminal event, captures usage, and cancels remaining stream reading. Success requires response.completed/status=completed and valid output/usage. Failed/incomplete events, explicit errors, interruption and timeout remain errors. Chat Completions requires one complete text choice (`stop`) or function turn (`tool_calls`), with valid usage in either case. A truncated or refused response is not a successful completion.
 
 Core input/output/total must be nonnegative integers with consistent sums. Chat Completions usage is preserved raw and normalized for the common ledger. Raw usage and provider diagnostics are redacted before entering the shared in-flight ledger, not only before persistence. Optional cache/reasoning fields remain unknown when absent; they are subsets, not extra total tokens. A failure may still have observed usage. Missing usage stops dispatch rather than creating a misleading zero.
 
