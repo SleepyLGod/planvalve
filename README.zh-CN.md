@@ -86,15 +86,15 @@ npm run local -- start --keep-awake
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <a href="docs/assets/dashboard-en.png"><img src="docs/assets/dashboard-en.png" alt="PlanValve 英文看板总览，显示运行状态、用量和一条已完成的请求"></a>
+      <a href="docs/assets/dashboard-en.png"><img src="docs/assets/dashboard-en.png" alt="PlanValve 英文请求列表，显示 Astra 的 TTFT 和 43 个总 token"></a>
     </td>
     <td width="50%" valign="top">
-      <a href="docs/assets/request-detail-en.png"><img src="docs/assets/request-detail-en.png" alt="gpt-6-astra 请求详情，输入 16、输出 12、合计 28 token"></a>
+      <a href="docs/assets/request-detail-en.png"><img src="docs/assets/request-detail-en.png" alt="Astra 英文请求详情，显示估算 TPOT 和 token 用量"></a>
     </td>
   </tr>
 </table>
 
-*两张英文界面图都来自同一条通过 ChatGPT 官方登录发出的真实 `gpt-6-astra` 请求。总览图在网关停止后按记录重绘。*
+*两张截图回放的是同一条通过 OpenAI API Key 通道发出的真实 `gpt-6-astra` 请求。*
 
 网关运行后，在另一个终端执行：
 

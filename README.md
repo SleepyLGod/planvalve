@@ -86,15 +86,15 @@ The flag is off by default. It prevents idle system sleep until the gateway exit
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <a href="docs/assets/dashboard-en.png"><img src="docs/assets/dashboard-en.png" alt="PlanValve overview with runtime status, token usage, and a completed request"></a>
+      <a href="docs/assets/dashboard-en.png"><img src="docs/assets/dashboard-en.png" alt="PlanValve request list showing Astra's TTFT and 43 total tokens"></a>
     </td>
     <td width="50%" valign="top">
-      <a href="docs/assets/request-detail-en.png"><img src="docs/assets/request-detail-en.png" alt="Completed gpt-6-astra request showing 16 input, 12 output, and 28 total tokens"></a>
+      <a href="docs/assets/request-detail-en.png"><img src="docs/assets/request-detail-en.png" alt="Astra request details showing estimated TPOT and token usage"></a>
     </td>
   </tr>
 </table>
 
-*Both views use data from the same live `gpt-6-astra` request through Sign in with ChatGPT. The overview was reconstructed after the gateway stopped.*
+*Both screenshots replay the same live `gpt-6-astra` request sent through PlanValve's OpenAI API Key mode.*
 
 With the local service running, use a separate terminal:
 
