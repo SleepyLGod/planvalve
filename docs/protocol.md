@@ -6,7 +6,7 @@ Client → validate → FIFO queue → explicit upstream → completion + server
 
 - Offline: SDK custom fetch serves the reconstructed local Responses fixture; no DNS or upstream socket.
 - ChatGPT subscription: official `POST https://api.openai.com/v1/responses`, OAuth bearer, `store:false`, `stream:true`. Text messages stay ordered; system becomes developer. No additional agent instructions, files or history.
-- API Key: official `POST https://api.openai.com/v1/chat/completions`, explicit server API key, `stream:false`. Roles and supported standard parameters remain intact. No Responses conversion is applied.
+- API Key: official `POST https://api.openai.com/v1/chat/completions`, explicit server API key, `stream:true`, `stream_options.include_usage:true`. Roles and supported standard parameters remain intact. No Responses conversion is applied.
 
 SDK constructors cannot inherit host credential defaults; requests use explicit transports. Destinations are fixed, redirects and retries are disabled. No browser login, model catalog request or test inference occurs during ordinary startup.
 
