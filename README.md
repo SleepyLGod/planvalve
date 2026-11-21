@@ -129,7 +129,7 @@ Supported route: `POST /v1/chat/completions`. `GET /v1/models` lists the configu
 
 API-key users can instead run the JavaScript/Python SDK examples with `--direct`, `MODEL` and `OPENAI_API_KEY`. Direct calls bypass the gateway's scheduling, history and dashboard. `--local` and `--direct` cannot be combined.
 
-Select a request and press Enter for send time, pre-send wait, TTFT, estimated TPOT, upstream latency and gateway duration. TTFT measures the first text received by the gateway. TPOT estimates the average visible-output interval after that first text. The API Key path now reads upstream chunks and assembles the same complete client response.
+The request list shows TTFT when the terminal is wide enough. Press Enter for the full timing details, including estimated TPOT. TTFT measures the time until the gateway receives the first text chunk. Estimated TPOT describes how quickly visible text arrives after that.
 
 ## Behavior and limits
 
@@ -155,9 +155,9 @@ npm run build
 npm test
 ```
 
-The **119-test offline suite** blocks non-loopback networking; POSIX terminal tests also require Python 3.9+. Optional [LiteLLM](docs/litellm-integration.md) and [LOTUS/SDK](docs/lotus.md) checks use existing Python environments.
+The offline test suite blocks non-loopback networking; POSIX terminal tests also require Python 3.9+. Optional [LiteLLM](docs/litellm-integration.md) and [LOTUS/SDK](docs/lotus.md) checks use existing Python environments.
 
-Bounded live checks covered subscription text/JSON, usage, restart reuse, renewal, LiteLLM and LOTUS. The latest two-request run observed concurrency **2** with sends **3.003 seconds** apart. API-key serving and limit recovery have offline coverage only. The offline checks [passed on Ubuntu and macOS](https://github.com/SleepyLGod/planvalve/actions/runs/43037455314). [Evidence, failures and remaining limits →](docs/offline-verification.md)
+Bounded live checks covered subscription text/JSON, usage, restart reuse, renewal, LiteLLM and LOTUS. A two-request subscription run observed concurrency **2** with sends **3.003 seconds** apart. One live JSON request through each of the subscription and API Key modes returned complete token usage and timing. Rate-limit recovery has offline coverage only. The offline checks [passed on Ubuntu and macOS](https://github.com/SleepyLGod/planvalve/actions/runs/44926909435). [Evidence, failures and remaining limits →](docs/offline-verification.md)
 
 ## Documentation
 
